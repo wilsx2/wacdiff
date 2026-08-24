@@ -18,10 +18,9 @@
 #include <string_view>
 
 template <typename InitialConditions>
-auto parse_config(const pugi::xml_node &sim) ->
-    SpmdFdmExplicitHeatEqSolver::Configuration {
-    using Config =
-        typename SpmdFdmExplicitHeatEqSolver::Configuration;
+auto parse_config(const pugi::xml_node &sim)
+    -> SpmdFdmExplicitHeatEqSolver::Configuration {
+    using Config = SpmdFdmExplicitHeatEqSolver::Configuration;
     constexpr auto NDims{DistributedStructuredGrid::NDims};
     Config config{};
 
@@ -49,30 +48,20 @@ auto parse_config(const pugi::xml_node &sim) ->
             config.boundary_conditions[dim] = PeriodicBoundary{};
             continue;
         } else {
-            std::pair<NonPeriodicBoundary, NonPeriodicBoundary> faces;
+            AxisFaces faces;
             for (const std::string_view &name : {"first", "last"}) {
                 auto node{required_child(axis, name)};
                 std::string_view face_type{node.attribute("type").value()};
-                if (face_type == "dierichlet") {
-                    if (name == "first") {
-                        faces.first = DierichletBoundary{
-                            child_value<double>(axis, "first")};
-                    } else if (name == "last") {
-                        faces.second =
-                            DierichletBoundary{child_value<double>(axis, "last")};
-                    }
+                NonPeriodicBoundary &face{name == "first" ? faces.first
+                                                          : faces.last};
+                if (face_type == "dirichlet") {
+                    face = DirichletBoundary{child_value<double>(axis, name)};
                 } else if (face_type == "neumann") {
-                    if (name == "first") {
-                        faces.first =
-                            NeumannBoundary{child_value<double>(axis, "first")};
-                    } else if (name == "last") {
-                        faces.second =
-                            NeumannBoundary{child_value<double>(axis, "last")};
-                    }
+                    face = NeumannBoundary{child_value<double>(axis, name)};
                 } else {
                     throw ConfigError{
                         std::format("Boundary type \"{}\" not recognized, only "
-                                    "\"dierichlet\" and \"neumann\" are valid.",
+                                    "\"dirichlet\" and \"neumann\" are valid.",
                                     face_type)};
                 }
             }
@@ -92,8 +81,7 @@ auto parse_config(const pugi::xml_node &sim) ->
 
 template <typename InitialConditions>
 auto solve(const pugi::xml_node &sim) -> void {
-    SpmdFdmExplicitHeatEqSolver solver{
-        parse_config<InitialConditions>(sim)};
+    SpmdFdmExplicitHeatEqSolver solver{parse_config<InitialConditions>(sim)};
     solver.run();
 }
 

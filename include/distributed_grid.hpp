@@ -27,9 +27,8 @@ class DistributedStructuredGrid {
 public:
     static constexpr std::ptrdiff_t NDims = 3;
 
-    using AxisBoundary =
-        std::variant<std::pair<NonPeriodicBoundary, NonPeriodicBoundary>,
-                     PeriodicBoundary>;
+    using AxisBoundary = std::variant<AxisFaces, PeriodicBoundary>;
+    using BoundaryConditions = std::span<const AxisBoundary, NDims>;
     using Subarray = decltype(std::declval<boost::multi::array<double, NDims> &>()(
         boost::multi::index_range{}, boost::multi::index_range{}));
 
@@ -46,12 +45,7 @@ private:
     double _cell_size;
 
     // Boundary Condition
-    struct FaceNeumannBoundary {
-        NeumannBoundary condition;
-        Subarray exterior_face;
-        Subarray interior_face;
-    };
-    std::inplace_vector<FaceNeumannBoundary, NDims * 2> _neumann_boundaries;
+    std::inplace_vector<NeumannApplicator<Subarray>, NDims * 2> _neumann_boundaries;
 
     // MPI Information
     int _world_rank, _world_size;
@@ -75,6 +69,7 @@ private:
     template <std::size_t... I>
     auto create_subarray(std::array<int, NDims> from, std::array<int, NDims> to,
                          std::index_sequence<I...>);
+    auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
     auto set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
         -> void;
 
@@ -85,10 +80,10 @@ public:
     DistributedStructuredGrid &operator=(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid(
         std::span<const int, NDims> size,
-        std::span<const AxisBoundary, NDims> global_boundaries,
+        BoundaryConditions boundary_specification,
         double block_size = 1, double default_value = 0);
     ~DistributedStructuredGrid();
-    auto synchronize_halos() -> void;
+    auto synchronize() -> void;
     auto inner_coordinates() const {
         return [&]<std::size_t... I>(std::index_sequence<I...>) {
             return std::views::cartesian_product(

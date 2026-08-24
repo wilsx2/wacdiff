@@ -19,9 +19,7 @@ public:
         // Initial Conditions
         InitialConditionUnion initial_conditions;
         // Boundary Conditions
-        std::array<DistributedStructuredGrid::AxisBoundary,
-                   DistributedStructuredGrid::NDims>
-            boundary_conditions;
+        std::array<DistributedStructuredGrid::AxisBoundary, DistributedStructuredGrid::NDims> boundary_conditions;
         // Convergence Params
         double epsilon;
         unsigned max_iterations;

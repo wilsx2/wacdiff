@@ -37,7 +37,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         SPDLOG_TRACE("Iteration {}", current_iterations);
 
         // Conditionally perform halo exchange / apply boundary condition
-        _double_grid[_grid_idx].synchronize_halos();
+        _double_grid[_grid_idx].synchronize();
 
         // Solve
         double total_norm_delta{0};
