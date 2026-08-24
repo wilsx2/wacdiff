@@ -1,4 +1,5 @@
 #include "solver.hpp"
+#include "initial_conditions.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-template <std::invocable<DistributedStructuredGrid &> InitialConditions>
-SpmdFdmExplicitHeatEqSolver<InitialConditions>::SpmdFdmExplicitHeatEqSolver(
+SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(
     Configuration &&config)
     : _constants{std::move(config)},
       _gamma(_constants.diffusion_constant *
@@ -24,11 +24,10 @@ SpmdFdmExplicitHeatEqSolver<InitialConditions>::SpmdFdmExplicitHeatEqSolver(
                        _constants.space_step}},
       _grid_idx{false}, _archive("sim", "temperature", _constants.space_step,
                                  _double_grid[_grid_idx]) {
-    _constants.initial_conditions(_double_grid[_grid_idx]);
+    std::visit(InitialConditionVisitor{_double_grid[_grid_idx]},_constants.initial_conditions);
 }
 
-template <std::invocable<DistributedStructuredGrid &> InitialConditions>
-auto SpmdFdmExplicitHeatEqSolver<InitialConditions>::run() -> void {
+auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     SPDLOG_TRACE("run()");
     auto current_iterations{0u};
     auto converged{false};
@@ -87,6 +86,3 @@ auto SpmdFdmExplicitHeatEqSolver<InitialConditions>::run() -> void {
                               current_iterations * _constants.time_step);
     }
 }
-
-template class SpmdFdmExplicitHeatEqSolver<ConstantInitialConditions>;
-template class SpmdFdmExplicitHeatEqSolver<ExpressionInitialConditions>;

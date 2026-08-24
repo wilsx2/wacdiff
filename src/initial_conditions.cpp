@@ -71,7 +71,7 @@ ExpressionInitialConditions &ExpressionInitialConditions::operator=(
 
 ExpressionInitialConditions::~ExpressionInitialConditions() = default;
 
-auto ExpressionInitialConditions::operator()(DistributedStructuredGrid &domain) const -> void {
+auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const -> void {
     auto &grid{domain.local_grid()};
     for (auto &&coordinate : domain.inner_coordinates()) {
         static constexpr auto DimSeq{

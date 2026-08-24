@@ -19,9 +19,9 @@
 
 template <typename InitialConditions>
 auto parse_config(const pugi::xml_node &sim) ->
-    typename SpmdFdmExplicitHeatEqSolver<InitialConditions>::Configuration {
+    SpmdFdmExplicitHeatEqSolver::Configuration {
     using Config =
-        typename SpmdFdmExplicitHeatEqSolver<InitialConditions>::Configuration;
+        typename SpmdFdmExplicitHeatEqSolver::Configuration;
     constexpr auto NDims{DistributedStructuredGrid::NDims};
     Config config{};
 
@@ -92,7 +92,7 @@ auto parse_config(const pugi::xml_node &sim) ->
 
 template <typename InitialConditions>
 auto solve(const pugi::xml_node &sim) -> void {
-    SpmdFdmExplicitHeatEqSolver<InitialConditions> solver{
+    SpmdFdmExplicitHeatEqSolver solver{
         parse_config<InitialConditions>(sim)};
     solver.run();
 }

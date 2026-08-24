@@ -3,25 +3,28 @@
 #include <cstddef>
 #include <memory>
 
+class InitialConditionVisitor;
+
 class ConstantInitialConditions {
+    friend InitialConditionVisitor;
+
 private:
     double _value;
 
 public:
     ConstantInitialConditions() = default;
     ConstantInitialConditions(std::string_view text);
-    template <typename T>
-    auto operator()(T &domain) const {
-        domain.fill(_value);
-    }
 };
 
 class ExpressionInitialConditions {
+    friend InitialConditionVisitor;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> _impl;
 
-    void compile();
+    auto compile() -> void;
+    auto apply(DistributedStructuredGrid &domain) const -> void;
 
 public:
     ExpressionInitialConditions();
@@ -29,7 +32,25 @@ public:
     ExpressionInitialConditions(const ExpressionInitialConditions &);
     ExpressionInitialConditions(ExpressionInitialConditions &&) noexcept;
     ExpressionInitialConditions &operator=(const ExpressionInitialConditions &);
-    ExpressionInitialConditions &operator=(ExpressionInitialConditions &&) noexcept;
+    ExpressionInitialConditions &
+    operator=(ExpressionInitialConditions &&) noexcept;
     ~ExpressionInitialConditions();
-    auto operator()(DistributedStructuredGrid &domain) const -> void;
+};
+
+using InitialConditionUnion =
+    std::variant<ConstantInitialConditions, ExpressionInitialConditions>;
+
+class InitialConditionVisitor {
+private:
+    DistributedStructuredGrid &_domain;
+
+public:
+    InitialConditionVisitor(DistributedStructuredGrid &domain)
+        : _domain(domain) {}
+    void operator()(const ConstantInitialConditions &ic) {
+        _domain.fill(ic._value);
+    }
+    void operator()(const ExpressionInitialConditions &ic) {
+        ic.apply(_domain);
+    }
 };

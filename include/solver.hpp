@@ -1,24 +1,13 @@
 #pragma once
 
 #include "distributed_grid.hpp"
-#include "h5raii.hpp"
 #include "initial_conditions.hpp"
-#include "storage.hpp"
 
 #include <mpi.h>
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
 #include <array>
-#include <concepts>
-#include <cstddef>
-#include <format>
-#include <numeric>
-#include <ranges>
-#include <utility>
-#include <vector>
 
-template <std::invocable<DistributedStructuredGrid &> InitialConditions>
 class SpmdFdmExplicitHeatEqSolver {
 public:
     struct Configuration {
@@ -28,7 +17,7 @@ public:
         double time_step;
         double space_step;
         // Initial Conditions
-        InitialConditions initial_conditions;
+        InitialConditionUnion initial_conditions;
         // Boundary Conditions
         std::array<DistributedStructuredGrid::AxisBoundary,
                    DistributedStructuredGrid::NDims>
@@ -53,6 +42,3 @@ public:
     SpmdFdmExplicitHeatEqSolver(Configuration &&config);
     auto run() -> void;
 };
-
-extern template class SpmdFdmExplicitHeatEqSolver<ConstantInitialConditions>;
-extern template class SpmdFdmExplicitHeatEqSolver<ExpressionInitialConditions>;
