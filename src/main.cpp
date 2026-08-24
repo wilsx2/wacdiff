@@ -17,22 +17,20 @@
 #include <print>
 #include <string_view>
 
-template <std::floating_point R, std::ptrdiff_t NDims,
-          typename InitialConditions>
+template <typename InitialConditions>
 auto parse_config(const pugi::xml_node &sim) ->
-    typename SpmdFdmExplicitHeatEqSolver<R, NDims,
-                                         InitialConditions>::Configuration {
+    typename SpmdFdmExplicitHeatEqSolver<InitialConditions>::Configuration {
     using Config =
-        typename SpmdFdmExplicitHeatEqSolver<R, NDims,
-                                             InitialConditions>::Configuration;
+        typename SpmdFdmExplicitHeatEqSolver<InitialConditions>::Configuration;
+    constexpr auto NDims{DistributedStructuredGrid::NDims};
     Config config{};
 
-    config.diffusion_constant = child_value<R>(sim, "diffusion");
+    config.diffusion_constant = child_value<double>(sim, "diffusion");
     config.storage_interval = child_value<unsigned>(sim, "checkpoint");
 
     auto grid{required_child(sim, "discretization")};
-    config.time_step = child_value<R>(grid, "time_step");
-    config.space_step = child_value<R>(grid, "cell_size");
+    config.time_step = child_value<double>(grid, "time_step");
+    config.space_step = child_value<double>(grid, "cell_size");
     auto dimensions{required_child(grid, "dimensions")};
     for (auto dim : std::views::iota(0, NDims)) {
         config.domain_size[dim] =
@@ -51,25 +49,25 @@ auto parse_config(const pugi::xml_node &sim) ->
             config.boundary_conditions[dim] = PeriodicBoundary{};
             continue;
         } else {
-            std::pair<NonPeriodicBoundary<R>, NonPeriodicBoundary<R>> faces;
+            std::pair<NonPeriodicBoundary, NonPeriodicBoundary> faces;
             for (const std::string_view &name : {"first", "last"}) {
                 auto node{required_child(axis, name)};
                 std::string_view face_type{node.attribute("type").value()};
                 if (face_type == "dierichlet") {
                     if (name == "first") {
-                        faces.first = DierichletBoundary<R>{
-                            child_value<R>(axis, "first")};
+                        faces.first = DierichletBoundary{
+                            child_value<double>(axis, "first")};
                     } else if (name == "last") {
                         faces.second =
-                            DierichletBoundary<R>{child_value<R>(axis, "last")};
+                            DierichletBoundary{child_value<double>(axis, "last")};
                     }
                 } else if (face_type == "neumann") {
                     if (name == "first") {
                         faces.first =
-                            NeumannBoundary<R>{child_value<R>(axis, "first")};
+                            NeumannBoundary{child_value<double>(axis, "first")};
                     } else if (name == "last") {
                         faces.second =
-                            NeumannBoundary<R>{child_value<R>(axis, "last")};
+                            NeumannBoundary{child_value<double>(axis, "last")};
                     }
                 } else {
                     throw ConfigError{
@@ -86,48 +84,17 @@ auto parse_config(const pugi::xml_node &sim) ->
     auto convergence{required_child(sim, "convergence_conditions")};
     config.max_iterations =
         child_value<unsigned>(convergence, "iterations_under");
-    config.epsilon = child_value<R>(convergence, "avg_delta_over");
+    config.epsilon = child_value<double>(convergence, "avg_delta_over");
 
     SPDLOG_TRACE(std::format("XML input file parsed"));
     return config;
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims,
-          typename InitialConditions>
+template <typename InitialConditions>
 auto solve(const pugi::xml_node &sim) -> void {
-    SpmdFdmExplicitHeatEqSolver<R, NDims, InitialConditions> solver{
-        parse_config<R, NDims, InitialConditions>(sim)};
+    SpmdFdmExplicitHeatEqSolver<InitialConditions> solver{
+        parse_config<InitialConditions>(sim)};
     solver.run();
-}
-
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto solve_with_ic(const pugi::xml_node &sim) -> void {
-    auto ic_type{child_attribute_text(sim, "initial_conditions", "type")};
-    if (ic_type == "constant") {
-        return solve<R, NDims, ConstantInitialConditions<R>>(sim);
-    } else if (ic_type == "expr") {
-        return solve<R, NDims, ExpressionInitialConditions<R>>(sim);
-    }
-
-    throw ConfigError{
-        std::format("Unsupported initial condition type \"{}\", only "
-                    "\"constant\" \"expression\" are supported",
-                    ic_type)};
-}
-
-template <std::floating_point R>
-auto dispatch_dimensions(const pugi::xml_node &sim) -> void {
-    auto dimensions{child_value<int>(sim, "dimensions")};
-
-    if (dimensions == 2) {
-        return solve_with_ic<R, 2>(sim);
-    }
-    if (dimensions == 3) {
-        return solve_with_ic<R, 3>(sim);
-    }
-    throw ConfigError{
-        std::format("Unsupported dimension \"{}\", only 2 and 3 are supported",
-                    dimensions)};
 }
 
 inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
@@ -138,17 +105,18 @@ inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
                         "provided)",
                         sim_type)};
     }
-    auto precision{child_text(sim, "precision")};
 
-    if (precision == "float") {
-        return dispatch_dimensions<float>(sim);
+    auto ic_type{child_attribute_text(sim, "initial_conditions", "type")};
+    if (ic_type == "constant") {
+        return solve<ConstantInitialConditions>(sim);
+    } else if (ic_type == "expr") {
+        return solve<ExpressionInitialConditions>(sim);
     }
-    if (precision == "double") {
-        return dispatch_dimensions<double>(sim);
-    }
-    throw ConfigError{std::format("Unsupported precision type \"{}\", only "
-                                  "float and double are supported",
-                                  precision)};
+
+    throw ConfigError{
+        std::format("Unsupported initial condition type \"{}\", only "
+                    "\"constant\" and \"expr\" are supported",
+                    ic_type)};
 }
 
 int main(int argc, char *argv[]) {

@@ -63,14 +63,13 @@ auto child_value(const pugi::xml_node &node, std::string_view child_name) -> T {
     return parse_value<T>(child_text(node, child_name));
 }
 
-template <std::floating_point R>
-auto child_pair(const pugi::xml_node &node, std::string_view child_name)
-    -> std::pair<R, R> {
+inline auto child_pair(const pugi::xml_node &node, std::string_view child_name)
+    -> std::pair<double, double> {
     auto child{required_child(node, child_name)};
     std::string_view text{child.child_value()};
     auto tokens{text | std::views::split(' ') |
                 std::views::filter([](auto token) { return !token.empty(); })};
-    R values[2]{};
+    double values[2]{};
     auto token_it{tokens.begin()};
     for (auto &value : values) {
         if (token_it == tokens.end()) {
@@ -79,7 +78,7 @@ auto child_pair(const pugi::xml_node &node, std::string_view child_name)
                                           child_name, node.name(), text)};
         }
         auto token{*token_it};
-        value = parse_value<R>(token);
+        value = parse_value<double>(std::string_view{token.begin(), token.end()});
         ++token_it;
     }
     if (token_it != tokens.end()) {

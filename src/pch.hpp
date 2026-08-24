@@ -7,7 +7,6 @@
 #include <H5Tpublic.h>
 #include <multi/array.hpp>
 #include <multi/array_ref.hpp>
-#include <exprtk.hpp>
 #ifndef SPDLOG_ACTIVE_LEVEL
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 #endif

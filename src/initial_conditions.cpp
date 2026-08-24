@@ -1,69 +1,86 @@
 #include "initial_conditions.hpp"
 
 #include "input.hpp"
-#include <stdexcept>
 #include <exprtk.hpp>
-#include <string_view>
-#include <utility>
 #include <memory>
+#include <stdexcept>
+#include <string_view>
 #include <tuple>
+#include <utility>
 
-template <typename R>
-ConstantInitialConditions<R>::ConstantInitialConditions(std::string_view text) {
-    _value = parse_value<R>(text);
+ConstantInitialConditions::ConstantInitialConditions(std::string_view text) {
+    _value = parse_value<double>(text);
 }
 
-template <typename R>
-void ExpressionInitialConditions<R>::compile() {
-    _symbol_table.clear();
-    _expression.release();
+struct ExpressionInitialConditions::Impl {
+    exprtk::symbol_table<double> symbol_table;
+    exprtk::expression<double>   expression;
+    exprtk::parser<double>       parser;
+    std::string                  expression_text;
+    mutable std::tuple<double, double, double> coordinate{0, 0, 0};
+};
 
-    _symbol_table.add_variable("x", std::get<0>(_coordinate));
-    _symbol_table.add_variable("y", std::get<1>(_coordinate));
-    _symbol_table.add_variable("z", std::get<2>(_coordinate));
-    _symbol_table.add_constants();
+void ExpressionInitialConditions::compile() {
+    _impl->symbol_table.clear();
+    _impl->expression.release();
 
-    _expression.register_symbol_table(_symbol_table);
+    _impl->symbol_table.add_variable("x", std::get<0>(_impl->coordinate));
+    _impl->symbol_table.add_variable("y", std::get<1>(_impl->coordinate));
+    _impl->symbol_table.add_variable("z", std::get<2>(_impl->coordinate));
+    _impl->symbol_table.add_constants();
 
-    if (!_parser.compile(_expression_text, _expression)) {
+    _impl->expression.register_symbol_table(_impl->symbol_table);
+
+    if (!_impl->parser.compile(_impl->expression_text, _impl->expression)) {
         throw std::runtime_error(std::format(
-            "Arithmetic expression \"\" failed to parse:", _parser.error()));
+            "Arithmetic expression \"{}\" failed to parse: {}",
+            _impl->expression_text, _impl->parser.error()));
     }
 }
 
-template <typename R>
-ExpressionInitialConditions<R>::ExpressionInitialConditions(
-    const ExpressionInitialConditions &other) {
-    *this = other;
-}
-template <typename R>
-ExpressionInitialConditions<R>::ExpressionInitialConditions(
-    ExpressionInitialConditions &&other) {
-    *this = other;
-}
-template <typename R>
-ExpressionInitialConditions<R> &ExpressionInitialConditions<R>::operator=(
-    const ExpressionInitialConditions &other) {
-    _expression_text = other._expression_text;
-    compile();
-    return *this;
-}
-template <typename R>
-ExpressionInitialConditions<R> &
-ExpressionInitialConditions<R>::operator=(ExpressionInitialConditions &&other) {
-    _expression_text = std::move(other._expression_text);
-    compile();
-    return *this;
-}
+ExpressionInitialConditions::ExpressionInitialConditions()
+    : _impl(std::make_unique<Impl>()) {}
 
-template <typename R>
-ExpressionInitialConditions<R>::ExpressionInitialConditions(
-    std::string_view text)
-    : _expression_text(text) {
+ExpressionInitialConditions::ExpressionInitialConditions(std::string_view text)
+    : _impl(std::make_unique<Impl>()) {
+    _impl->expression_text = text;
     compile();
 }
 
-template class ConstantInitialConditions<float>;
-template class ConstantInitialConditions<double>;
-template class ExpressionInitialConditions<float>;
-template class ExpressionInitialConditions<double>;
+ExpressionInitialConditions::ExpressionInitialConditions(
+    const ExpressionInitialConditions &other)
+    : _impl(std::make_unique<Impl>()) {
+    _impl->expression_text = other._impl->expression_text;
+    compile();
+}
+
+ExpressionInitialConditions::ExpressionInitialConditions(
+    ExpressionInitialConditions &&other) noexcept = default;
+
+ExpressionInitialConditions &ExpressionInitialConditions::operator=(
+    const ExpressionInitialConditions &other) {
+    if (this != &other) {
+        _impl->expression_text = other._impl->expression_text;
+        compile();
+    }
+    return *this;
+}
+
+ExpressionInitialConditions &ExpressionInitialConditions::operator=(
+    ExpressionInitialConditions &&other) noexcept = default;
+
+ExpressionInitialConditions::~ExpressionInitialConditions() = default;
+
+auto ExpressionInitialConditions::operator()(DistributedStructuredGrid &domain) const -> void {
+    auto &grid{domain.local_grid()};
+    for (auto &&coordinate : domain.inner_coordinates()) {
+        static constexpr auto DimSeq{
+            std::make_index_sequence<DistributedStructuredGrid::NDims>{}};
+        template for (constexpr auto D : DimSeq) {
+            std::get<D>(_impl->coordinate) =
+                static_cast<double>(std::get<D>(coordinate)) *
+                domain.cell_size();
+        }
+        grid.apply(coordinate) = _impl->expression.value();
+    }
+}

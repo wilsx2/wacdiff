@@ -18,25 +18,23 @@
 #include <utility>
 #include <vector>
 
-template <
-    std::floating_point R, std::ptrdiff_t NDims,
-    std::invocable<DistributedStructuredGrid<R, NDims> &> InitialConditions>
+template <std::invocable<DistributedStructuredGrid &> InitialConditions>
 class SpmdFdmExplicitHeatEqSolver {
 public:
     struct Configuration {
-        std::array<int, NDims> domain_size;
+        std::array<int, DistributedStructuredGrid::NDims> domain_size;
         // Heat Equation Parameters
-        R diffusion_constant;
-        R time_step;
-        R space_step;
+        double diffusion_constant;
+        double time_step;
+        double space_step;
         // Initial Conditions
         InitialConditions initial_conditions;
         // Boundary Conditions
-        std::array<typename DistributedStructuredGrid<R, NDims>::AxisBoundary,
-                   NDims>
+        std::array<DistributedStructuredGrid::AxisBoundary,
+                   DistributedStructuredGrid::NDims>
             boundary_conditions;
         // Convergence Params
-        R epsilon;
+        double epsilon;
         unsigned max_iterations;
         // Storage Params
         unsigned storage_interval;
@@ -44,11 +42,11 @@ public:
 
 private:
     const Configuration _constants;
-    R _gamma;
-    std::array<DistributedStructuredGrid<R, NDims>, 2> _double_grid;
+    double _gamma;
+    std::array<DistributedStructuredGrid, 2> _double_grid;
     bool _grid_idx;
 
-    DSGArchive<R, NDims> _archive;
+    DSGArchive _archive;
 
 public:
     SpmdFdmExplicitHeatEqSolver() = delete;
@@ -56,11 +54,5 @@ public:
     auto run() -> void;
 };
 
-extern template class SpmdFdmExplicitHeatEqSolver<float, 2, ConstantInitialConditions<float>>;
-extern template class SpmdFdmExplicitHeatEqSolver<float, 2, ExpressionInitialConditions<float>>;
-extern template class SpmdFdmExplicitHeatEqSolver<float, 3, ConstantInitialConditions<float>>;
-extern template class SpmdFdmExplicitHeatEqSolver<float, 3, ExpressionInitialConditions<float>>;
-extern template class SpmdFdmExplicitHeatEqSolver<double, 2, ConstantInitialConditions<double>>;
-extern template class SpmdFdmExplicitHeatEqSolver<double, 2, ExpressionInitialConditions<double>>;
-extern template class SpmdFdmExplicitHeatEqSolver<double, 3, ConstantInitialConditions<double>>;
-extern template class SpmdFdmExplicitHeatEqSolver<double, 3, ExpressionInitialConditions<double>>;
+extern template class SpmdFdmExplicitHeatEqSolver<ConstantInitialConditions>;
+extern template class SpmdFdmExplicitHeatEqSolver<ExpressionInitialConditions>;

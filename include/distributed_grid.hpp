@@ -23,30 +23,31 @@
 #include <tuple>
 #include <utility>
 
-template <std::floating_point R, std::ptrdiff_t NDims>
 class DistributedStructuredGrid {
 public:
+    static constexpr std::ptrdiff_t NDims = 3;
+
     using AxisBoundary =
-        std::variant<std::pair<NonPeriodicBoundary<R>, NonPeriodicBoundary<R>>,
+        std::variant<std::pair<NonPeriodicBoundary, NonPeriodicBoundary>,
                      PeriodicBoundary>;
-    using Subarray = decltype(std::declval<boost::multi::array<R, NDims> &>()(
+    using Subarray = decltype(std::declval<boost::multi::array<double, NDims> &>()(
         boost::multi::index_range{}, boost::multi::index_range{}));
 
 private:
-    // Data and Paritioning
+    // Data and Partitioning
     std::array<int32_t, NDims> _global_size;
     std::array<int32_t, NDims> _local_size;
     std::array<int32_t, NDims> _local_start;
     std::array<int32_t, NDims> _exterior_size;
-    boost::multi::array<R, NDims> _mdarray;
+    boost::multi::array<double, NDims> _mdarray;
     Subarray _inner_subarray;
 
     // Metadata
-    R _cell_size;
+    double _cell_size;
 
     // Boundary Condition
     struct FaceNeumannBoundary {
-        NeumannBoundary<R> condition;
+        NeumannBoundary condition;
         Subarray exterior_face;
         Subarray interior_face;
     };
@@ -74,20 +75,18 @@ private:
     template <std::size_t... I>
     auto create_subarray(std::array<int, NDims> from, std::array<int, NDims> to,
                          std::index_sequence<I...>);
-    auto
-    set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
+    auto set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
         -> void;
 
 public:
     DistributedStructuredGrid(const DistributedStructuredGrid &) = delete;
-    DistributedStructuredGrid &
-    operator=(const DistributedStructuredGrid &) = delete;
+    DistributedStructuredGrid &operator=(const DistributedStructuredGrid &) = delete;
     DistributedStructuredGrid(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid &operator=(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid(
         std::span<const int, NDims> size,
         std::span<const AxisBoundary, NDims> global_boundaries,
-        R block_size = 1, R default_value = 0);
+        double block_size = 1, double default_value = 0);
     ~DistributedStructuredGrid();
     auto synchronize_halos() -> void;
     auto inner_coordinates() const {
@@ -96,9 +95,9 @@ public:
                 std::views::iota(1, _exterior_size[I] - 1)...);
         }(std::make_index_sequence<NDims>{});
     }
-    auto fill(R value) { std::ranges::fill(_inner_subarray.elements(), value); }
-    auto local_grid() -> boost::multi::array<R, NDims> & { return _mdarray; }
-    auto local_grid() const -> const boost::multi::array<R, NDims> & {
+    auto fill(double value) { std::ranges::fill(_inner_subarray.elements(), value); }
+    auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }
+    auto local_grid() const -> const boost::multi::array<double, NDims> & {
         return _mdarray;
     }
     auto local_size() const -> const std::array<int, NDims> & {
@@ -110,40 +109,31 @@ public:
     auto global_size() const -> const std::array<int, NDims> & {
         return _global_size;
     }
-    auto cell_size() const -> R { return _cell_size; }
+    auto cell_size() const -> double { return _cell_size; }
 
     auto comm() const -> MPI_Comm { return _cart_comm; }
     auto world_rank() const -> int { return _world_rank; }
 };
 
-extern template class DistributedStructuredGrid<float, 2>;
-extern template class DistributedStructuredGrid<float, 3>;
-extern template class DistributedStructuredGrid<double, 2>;
-extern template class DistributedStructuredGrid<double, 3>;
-
-template <std::floating_point R, std::ptrdiff_t NDims>
-class DSGArchive : public Archive<DistributedStructuredGrid<R, NDims>> {
+class DSGArchive : public Archive<DistributedStructuredGrid> {
 private:
-    using DSG = DistributedStructuredGrid<R, NDims>;
+    using DSG  = DistributedStructuredGrid;
     using Base = Archive<DSG>;
+
+    static constexpr std::ptrdiff_t NDims = DistributedStructuredGrid::NDims;
 
     std::array<hsize_t, NDims> _cached_global_size;
     std::array<hsize_t, NDims> _cached_local_start;
     std::array<hsize_t, NDims> _cached_local_size;
     std::array<hsize_t, NDims> _cached_exterior_size;
     std::string _label;
-    R _block_size;
+    double _block_size;
 
-    void write_light_data(const DSG &state, int step, R time);
+    void write_light_data(const DSG &state, int step, double time);
     void write_heavy_data(const DSG &state, int step);
 
 public:
-    DSGArchive(std::string filename, std::string label, R block_size,
+    DSGArchive(std::string filename, std::string label, double block_size,
                const DSG &grid);
-    void append_state(const DSG &state, int step, R time);
+    void append_state(const DSG &state, int step, double time);
 };
-
-extern template class DSGArchive<float, 2>;
-extern template class DSGArchive<float, 3>;
-extern template class DSGArchive<double, 2>;
-extern template class DSGArchive<double, 3>;

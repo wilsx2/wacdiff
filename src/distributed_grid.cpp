@@ -10,8 +10,7 @@
 #include <string_view>
 #include <utility>
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::init_topology(
+auto DistributedStructuredGrid::init_topology(
     std::span<int, NDims> periods) -> void {
     /// Cartesian grid
     std::fill(_cart_dims.begin(), _cart_dims.end(), 0);
@@ -54,10 +53,9 @@ auto DistributedStructuredGrid<R, NDims>::init_topology(
                     _cart_rank, _local_start, _local_size));
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::init_transfer_types() -> void {
+auto DistributedStructuredGrid::init_transfer_types() -> void {
     MPI_Datatype element_type;
-    MPI_Type_match_size(MPI_TYPECLASS_REAL, sizeof(R), &element_type);
+    MPI_Type_match_size(MPI_TYPECLASS_REAL, sizeof(double), &element_type);
     for (auto dim : std::views::iota(0, NDims)) {
         std::array<int, NDims> interior_face_subsizes;
         std::array<int, NDims> exterior_face_subsizes;
@@ -110,8 +108,7 @@ auto DistributedStructuredGrid<R, NDims>::init_transfer_types() -> void {
     }
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::deinit_transfer_types() -> void {
+auto DistributedStructuredGrid::deinit_transfer_types() -> void {
     for (auto dim : std::views::iota(0, NDims)) {
         MPI_Type_free(&_interior_face_types[dim].first);
         MPI_Type_free(&_exterior_face_types[dim].first);
@@ -120,8 +117,7 @@ auto DistributedStructuredGrid<R, NDims>::deinit_transfer_types() -> void {
     }
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::init_requests() -> void {
+auto DistributedStructuredGrid::init_requests() -> void {
     for (auto dim : std::views::iota(0, NDims)) {
         auto neighbors{_cart_neighbors[dim]};
 
@@ -140,29 +136,26 @@ auto DistributedStructuredGrid<R, NDims>::init_requests() -> void {
     }
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::deinit_requests() -> void {
+auto DistributedStructuredGrid::deinit_requests() -> void {
     for (auto &request : _requests) {
         MPI_Request_free(&request);
     }
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
 template <std::size_t... I>
-auto DistributedStructuredGrid<R, NDims>::create_subarray(
+auto DistributedStructuredGrid::create_subarray(
     std::array<int, NDims> from, std::array<int, NDims> to,
     std::index_sequence<I...>) {
     return _mdarray(boost::multi::index_range{from[I], to[I]}...);
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::set_local_boundaries(
+auto DistributedStructuredGrid::set_local_boundaries(
     std::span<const AxisBoundary, NDims> axis_boundaries) -> void {
     _neumann_boundaries.clear();
 
     auto apply_boundaries{[&](int axis, bool first) {
         auto axis_boundary{
-            std::get<std::pair<NonPeriodicBoundary<R>, NonPeriodicBoundary<R>>>(
+            std::get<std::pair<NonPeriodicBoundary, NonPeriodicBoundary>>(
                 axis_boundaries[axis])};
         auto boundary{[&]() -> auto & {
             if (first)
@@ -190,10 +183,10 @@ auto DistributedStructuredGrid<R, NDims>::set_local_boundaries(
             return create_subarray(from, to, std::make_index_sequence<NDims>{});
         }};
 
-        if (auto dierichlet = std::get_if<DierichletBoundary<R>>(&boundary())) {
+        if (auto dierichlet = std::get_if<DierichletBoundary>(&boundary())) {
             std::ranges::fill(exterior_face().elements(), dierichlet->value);
         } else {
-            auto neumann{std::get_if<NeumannBoundary<R>>(&boundary())};
+            auto neumann{std::get_if<NeumannBoundary>(&boundary())};
             assert(neumann != nullptr);
 
             auto interior_face{[&]() {
@@ -226,11 +219,10 @@ auto DistributedStructuredGrid<R, NDims>::set_local_boundaries(
     }
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-DistributedStructuredGrid<R, NDims>::DistributedStructuredGrid(
+DistributedStructuredGrid::DistributedStructuredGrid(
     std::span<const int, NDims> size,
-    std::span<const AxisBoundary, NDims> global_boundaries, R cell_size,
-    R default_value)
+    std::span<const AxisBoundary, NDims> global_boundaries, double cell_size,
+    double default_value)
     : _cell_size(cell_size) {
     MPI_Comm_rank(MPI_COMM_WORLD, &_world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &_world_size);
@@ -255,7 +247,7 @@ DistributedStructuredGrid<R, NDims>::DistributedStructuredGrid(
                 static_cast<std::ptrdiff_t>(s)...);
         },
         extensions)};
-    _mdarray = boost::multi::array<R, NDims>(extents, default_value);
+    _mdarray = boost::multi::array<double, NDims>(extents, default_value);
     std::array<int, NDims> inner_from;
     std::array<int, NDims> inner_to;
     for (auto dim : std::views::iota(0, NDims)) {
@@ -270,29 +262,22 @@ DistributedStructuredGrid<R, NDims>::DistributedStructuredGrid(
     init_requests();
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-DistributedStructuredGrid<R, NDims>::~DistributedStructuredGrid() {
+DistributedStructuredGrid::~DistributedStructuredGrid() {
     deinit_transfer_types();
     deinit_requests();
     MPI_Comm_free(&_cart_comm);
 }
 
-template <std::floating_point R, std::ptrdiff_t NDims>
-auto DistributedStructuredGrid<R, NDims>::synchronize_halos() -> void {
+auto DistributedStructuredGrid::synchronize_halos() -> void {
     MPI_Startall(_requests.size(), _requests.data());
     for (auto &neumann : _neumann_boundaries) {
         // TODO: Bring in OpenMP
         std::ranges::transform(neumann.interior_face.elements(),
                                neumann.exterior_face.elements().begin(),
-                               [delta = neumann.condition.delta](R value) {
+                               [delta = neumann.condition.delta](double value) {
                                    return value + delta;
                                });
     }
     std::array<MPI_Status, _requests.size()> statuses;
     MPI_Waitall(_requests.size(), _requests.data(), statuses.data());
 }
-
-template class DistributedStructuredGrid<float, 2>;
-template class DistributedStructuredGrid<float, 3>;
-template class DistributedStructuredGrid<double, 2>;
-template class DistributedStructuredGrid<double, 3>;
