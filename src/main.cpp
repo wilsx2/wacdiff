@@ -86,14 +86,6 @@ auto solve(const pugi::xml_node &sim) -> void {
 }
 
 inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
-    if (std::string_view sim_type{sim.attribute("type").value()};
-        sim_type != "heat") {
-        throw ConfigError{
-            std::format("Non-heat simulation types not supported (\"{}\" "
-                        "provided)",
-                        sim_type)};
-    }
-
     auto ic_type{child_attribute_text(sim, "initial_conditions", "type")};
     if (ic_type == "constant") {
         return solve<ConstantInitialConditions>(sim);

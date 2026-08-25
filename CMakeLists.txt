@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(wacheat LANGUAGES C CXX)
+project(wacdiff LANGUAGES C CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_C_STANDARD 99)
@@ -79,18 +79,18 @@ add_library(exprtk INTERFACE)
 target_include_directories(exprtk INTERFACE ${exprtk_SOURCE_DIR})
 
 # Application
-add_executable(wacheat
+add_executable(wacdiff
     src/main.cpp
     src/distributed_grid.cpp
     src/dsg_archive.cpp
     src/initial_conditions.cpp
     src/solver.cpp
 )
-target_include_directories(wacheat PUBLIC
+target_include_directories(wacdiff PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_precompile_headers(wacheat PRIVATE src/pch.hpp)
-target_link_libraries(wacheat PUBLIC
+target_precompile_headers(wacdiff PRIVATE src/pch.hpp)
+target_link_libraries(wacdiff PUBLIC
     OpenMP::OpenMP_CXX
     MPI::MPI_CXX
     hdf5::hdf5
@@ -101,4 +101,4 @@ target_link_libraries(wacheat PUBLIC
     spdlog
     exprtk
 )
-target_link_options(wacheat PRIVATE -Wl,-z,muldefs)
+target_link_options(wacdiff PRIVATE -Wl,-z,muldefs)

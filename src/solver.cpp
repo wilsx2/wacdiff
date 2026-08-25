@@ -10,21 +10,21 @@
 #include <utility>
 #include <vector>
 
-SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(
-    Configuration &&config)
+SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
     : _constants{std::move(config)},
       _gamma(_constants.diffusion_constant *
              (_constants.time_step /
               (_constants.space_step * _constants.space_step))),
-      _double_grid{DistributedStructuredGrid{
-                       _constants.domain_size, _constants.boundary_conditions,
-                       _constants.space_step},
-                   DistributedStructuredGrid{
-                       _constants.domain_size, _constants.boundary_conditions,
-                       _constants.space_step}},
+      _double_grid{DistributedStructuredGrid{_constants.domain_size,
+                                             _constants.boundary_conditions,
+                                             _constants.space_step},
+                   DistributedStructuredGrid{_constants.domain_size,
+                                             _constants.boundary_conditions,
+                                             _constants.space_step}},
       _grid_idx{false}, _archive("sim", "temperature", _constants.space_step,
                                  _double_grid[_grid_idx]) {
-    std::visit(InitialConditionVisitor{_double_grid[_grid_idx]},_constants.initial_conditions);
+    std::visit(InitialConditionVisitor{_double_grid[_grid_idx]},
+               _constants.initial_conditions);
 }
 
 auto SpmdFdmExplicitHeatEqSolver::run() -> void {
@@ -34,7 +34,6 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
     // Perform simulation
     while (!converged) {
-        SPDLOG_TRACE("Iteration {}", current_iterations);
 
         // Conditionally perform halo exchange / apply boundary condition
         _double_grid[_grid_idx].synchronize();
@@ -59,8 +58,9 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                                 curr.apply(last_neighbor_idx);
             }
 
-            auto delta{_gamma * (neighbor_sum - static_cast<double>(NumNeighbors) *
-                                                    curr.apply(idx))};
+            auto delta{_gamma *
+                       (neighbor_sum -
+                        static_cast<double>(NumNeighbors) * curr.apply(idx))};
             next.apply(idx) = curr.apply(idx) + delta;
             total_norm_delta += delta * delta;
         }
@@ -79,6 +79,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         // Check convergence
         converged = avg_norm_delta < _constants.epsilon ||
                     current_iterations >= _constants.max_iterations;
+        SPDLOG_TRACE("current_iterations={}, avg_norm_delta={}",
+                     current_iterations, avg_norm_delta);
         ++current_iterations;
     }
     if ((current_iterations - 1) % _constants.storage_interval != 0) {

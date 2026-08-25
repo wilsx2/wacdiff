@@ -1,4 +1,5 @@
 #include "distributed_grid.hpp"
+#include "boundary.hpp"
 
 #include <algorithm>
 #include <array>
@@ -151,22 +152,35 @@ auto DistributedStructuredGrid::create_subarray(std::array<int, NDims> from,
 
 auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
                                          FaceKind kind) -> Subarray {
-    const int axis_from =
-        (end == FaceEnd::First)
-            ? (kind == FaceKind::Interior ? 1 : 0)
-            : (kind == FaceKind::Interior ? _exterior_size[axis] - 2
-                                          : _exterior_size[axis] - 1);
-    const int axis_to = (end == FaceEnd::First)
-                            ? (kind == FaceKind::Interior ? 2 : 1)
-                            : _exterior_size[axis];
-
     std::array<int, NDims> from;
     std::array<int, NDims> to;
-    for (auto dim : std::views::iota(0, NDims)) {
-        from[dim] = (dim == axis) ? axis_from : 1;
-        to[dim] = (dim == axis) ? axis_to : _exterior_size[dim] - 1;
-    }
+    if (kind == FaceKind::Interior) {
+        if (end == FaceEnd::First) {
+            for (auto dim : std::views::iota(0, NDims)) {
+                from[dim] = 1;
+                to[dim] = (dim == axis) ? 2 : _exterior_size[dim] - 1;
+            }
+        } else {
+            for (auto dim : std::views::iota(0, NDims)) {
+                to[dim] = _exterior_size[dim] - 1;
+                from[dim] = (dim == axis) ? _exterior_size[dim] - 2 : 1;
+            }
+        }
+    } else {
 
+        if (end == FaceEnd::First) {
+            for (auto dim : std::views::iota(0, NDims)) {
+                from[dim] = (dim == axis) ? 0 : 1;
+                to[dim] = (dim == axis) ? 1 : _exterior_size[dim] - 1;
+            }
+        } else {
+            for (auto dim : std::views::iota(0, NDims)) {
+                to[dim] = (dim == axis) ? _exterior_size[dim]
+                                        : _exterior_size[dim] - 1;
+                from[dim] = (dim == axis) ? _exterior_size[dim] - 1 : 1;
+            }
+        }
+    }
     return create_subarray(from, to, std::make_index_sequence<NDims>{});
 }
 
