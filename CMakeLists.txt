@@ -50,6 +50,19 @@ endif()
 # Packages
 find_package(OpenMP REQUIRED)
 find_package(MPI REQUIRED COMPONENTS CXX)
+
+# This code uses HDF5's MPI-IO API, so it must link against the parallel
+# (MPI-enabled) HDF5 build rather than the serial one.
+set(HDF5_PREFER_PARALLEL TRUE)
+if(NOT HDF5_C_COMPILER_EXECUTABLE)
+    find_program(HDF5_C_COMPILER_EXECUTABLE NAMES h5pcc h5cc)
+endif()
+if(NOT HDF5_CXX_COMPILER_EXECUTABLE)
+    # Debian/Ubuntu name the parallel C++ wrapper h5c++.openmpi instead of
+    # the h5pc++ name expected by FindHDF5.
+    find_program(HDF5_CXX_COMPILER_EXECUTABLE
+        NAMES h5c++.openmpi h5pc++ h5c++)
+endif()
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 include(FetchContent)
