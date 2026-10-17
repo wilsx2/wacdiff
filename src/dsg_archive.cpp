@@ -2,11 +2,38 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
+
+namespace {
+auto join_transformed(const auto &range, auto &&transform) -> std::string {
+    std::string result;
+    bool first{true};
+    for (const auto &value : range) {
+        if (!first) {
+            result += ' ';
+        }
+        first = false;
+        result += transform(value);
+    }
+    return result;
+}
+
+auto repeat_joined(const std::string &value, std::size_t count) -> std::string {
+    std::string result;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i != 0) {
+            result += ' ';
+        }
+        result += value;
+    }
+    return result;
+}
+} // namespace
 
 void DSGArchive::write_light_data(const DSG &state, int step, double time) {
     auto grid{
@@ -20,10 +47,9 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
 
     {
         static const std::string point_dimensions_string(
-            state.global_size() | std::views::transform([&](auto size) {
+            join_transformed(state.global_size(), [](auto size) {
                 return std::format("{}", size + 1);
-            }) |
-            std::views::join_with(' ') | std::ranges::to<std::string>());
+            }));
 
         auto topology(grid.append_child("Topology"));
         topology.append_attribute("TopologyType").set_value("3DCoRectMesh");
@@ -35,10 +61,8 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
         geometry.append_attribute("GeometryType").set_value("ORIGIN_DXDYDZ");
 
         {
-            using namespace std::string_view_literals;
             static const std::string ndim_zeros(
-                std::views::repeat("0.0"sv, NDims) | std::views::join_with(' ') |
-                std::ranges::to<std::string>());
+                repeat_joined("0.0", static_cast<std::size_t>(NDims)));
 
             auto origin{geometry.append_child("DataItem")};
             origin.append_attribute("Dimensions").set_value(NDims);
@@ -47,8 +71,8 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
         }
         {
             static const std::string ndim_block_sizes(
-                std::views::repeat(std::format("{}", _block_size), NDims) |
-                std::views::join_with(' ') | std::ranges::to<std::string>());
+                repeat_joined(std::format("{}", _block_size),
+                              static_cast<std::size_t>(NDims)));
             auto delta{geometry.append_child("DataItem")};
             delta.append_attribute("Dimensions").set_value(NDims);
             delta.append_attribute("Format").set_value("XML");
@@ -62,10 +86,9 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
         attr.append_attribute("Center").set_value("Cell");
         {
             static const std::string cell_dimensions_string(
-                state.global_size() | std::views::transform([&](auto size) {
+                join_transformed(state.global_size(), [](auto size) {
                     return std::format("{}", size);
-                }) |
-                std::views::join_with(' ') | std::ranges::to<std::string>());
+                }));
 
             auto data_item{attr.append_child("DataItem")};
             data_item.append_attribute("Dimensions")

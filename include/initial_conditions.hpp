@@ -2,6 +2,8 @@
 #include "distributed_grid.hpp"
 #include <cstddef>
 #include <memory>
+#include <string_view>
+#include <variant>
 
 class InitialConditionVisitor;
 

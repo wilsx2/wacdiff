@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <format>
@@ -10,6 +11,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     -> void {
@@ -186,7 +188,7 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
 
 auto DistributedStructuredGrid::set_local_boundaries(
     std::span<const AxisBoundary, NDims> axis_boundaries) -> void {
-    _neumann_boundaries.clear();
+    _neumann_boundary_count = 0;
 
     auto apply_boundary{[&](int axis, FaceEnd end) {
         auto interior_face{get_face(axis, end, FaceKind::Interior)};
@@ -201,9 +203,10 @@ auto DistributedStructuredGrid::set_local_boundaries(
         } else {
             const auto *neumann{std::get_if<NeumannBoundary>(&boundary)};
             assert(neumann != nullptr);
-            _neumann_boundaries.emplace_back(neumann->delta,
-                                             std::move(exterior_face),
-                                             std::move(interior_face));
+            _neumann_boundaries[_neumann_boundary_count++]
+                = {neumann->delta,
+                   std::move(exterior_face),
+                   std::move(interior_face)};
         }
     }};
 
@@ -225,10 +228,11 @@ DistributedStructuredGrid::DistributedStructuredGrid(
     SPDLOG_DEBUG("Process {}/{} (rank {})", _world_rank + 1, _world_size,
                  _world_rank);
 
-    std::array<int, NDims> periods;
-    for (auto &&[axis_boundary, period] :
-         std::views::zip(boundary_specification, periods)) {
-        period = std::get_if<PeriodicBoundary>(&axis_boundary) != nullptr;
+    std::array<int, NDims> periods{};
+    for (auto dim : std::views::iota(0, NDims)) {
+        periods[dim] =
+            std::get_if<PeriodicBoundary>(&boundary_specification[dim]) !=
+            nullptr;
     }
     init_topology(periods);
 
@@ -265,8 +269,8 @@ DistributedStructuredGrid::~DistributedStructuredGrid() {
 
 auto DistributedStructuredGrid::synchronize() -> void {
     MPI_Startall(_requests.size(), _requests.data());
-    for (auto &neumann : _neumann_boundaries) {
-        neumann.apply();
+    for (auto i = 0u; i < _neumann_boundary_count; ++i) {
+        _neumann_boundaries[i].apply();
     }
     std::array<MPI_Status, _requests.size()> statuses;
     MPI_Waitall(_requests.size(), _requests.data(), statuses.data());

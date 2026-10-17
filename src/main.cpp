@@ -14,7 +14,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <print>
+#include <ranges>
 #include <string_view>
 
 template <typename InitialConditions>
@@ -124,7 +124,8 @@ int main(int argc, char *argv[]) {
         std::filesystem::create_directory(output_path);
         std::filesystem::current_path(output_path);
     } catch (const std::exception &err) {
-        std::print("Directory '{}' failed to create or enter", output_path);
+        std::cerr << std::format("Directory '{}' failed to create or enter\n",
+                                 output_path);
         return EXIT_FAILURE;
     }
 

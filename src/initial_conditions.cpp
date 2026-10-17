@@ -2,6 +2,7 @@
 
 #include "input.hpp"
 #include <exprtk.hpp>
+#include <format>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
@@ -76,11 +77,13 @@ auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const
     for (auto &&coordinate : domain.inner_coordinates()) {
         static constexpr auto DimSeq{
             std::make_index_sequence<DistributedStructuredGrid::NDims>{}};
-        template for (constexpr auto D : DimSeq) {
-            std::get<D>(_impl->coordinate) =
-                static_cast<double>(std::get<D>(coordinate)) *
-                domain.cell_size();
-        }
+        [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
+            ([&] {
+                std::get<Ds>(_impl->coordinate) =
+                    static_cast<double>(std::get<Ds>(coordinate)) *
+                    domain.cell_size();
+            }(), ...);
+        }(DimSeq);
         grid.apply(coordinate) = _impl->expression.value();
     }
 }

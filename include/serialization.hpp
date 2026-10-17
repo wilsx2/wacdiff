@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <fstream>
 #include <multi/array_ref.hpp>
 #include <string>

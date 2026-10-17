@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <ranges>
+#include <variant>
+
 struct DirichletBoundary {
     double value;
 };

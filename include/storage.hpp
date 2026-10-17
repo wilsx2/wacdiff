@@ -5,6 +5,7 @@
 #include <multi/array_ref.hpp>
 #include <pugixml.hpp>
 #include <spdlog/spdlog.h>
+#include <string>
 #include <string_view>
 
 template <typename T>

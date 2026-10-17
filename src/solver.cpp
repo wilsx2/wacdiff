@@ -8,6 +8,7 @@
 #include <numeric>
 #include <ranges>
 #include <utility>
+#include <variant>
 #include <vector>
 
 SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
@@ -49,14 +50,18 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             constexpr auto NumNeighbors{NDims * 2};
             double neighbor_sum{0};
             static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
-            template for (constexpr auto D : DimSeq) {
-                auto first_neighbor_idx{idx};
-                auto last_neighbor_idx{idx};
-                std::get<D>(first_neighbor_idx) -= 1;
-                std::get<D>(last_neighbor_idx) += 1;
-                neighbor_sum += curr.apply(first_neighbor_idx) +
-                                curr.apply(last_neighbor_idx);
-            }
+            [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
+                ([&] {
+                    auto first_neighbor_idx{idx};
+                    auto last_neighbor_idx{idx};
+
+                    std::get<Ds>(first_neighbor_idx) -= 1;
+                    std::get<Ds>(last_neighbor_idx) += 1;
+
+                    neighbor_sum += curr.apply(first_neighbor_idx) +
+                                    curr.apply(last_neighbor_idx);
+                }(), ...);
+            }(DimSeq);
 
             auto delta{_gamma *
                        (neighbor_sum -
@@ -66,12 +71,22 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         }
         auto avg_norm_delta{total_norm_delta /
                             static_cast<double>(inner_coordinates.size())};
+        
+        MPI_Allreduce(
+            MPI_IN_PLACE,
+            &avg_norm_delta,
+            1,
+            MPI_DOUBLE,
+            MPI_SUM,
+            MPI_COMM_WORLD
+        );
 
         // Swap roles of current and next grids
         _grid_idx = !_grid_idx;
 
         // Save
-        if (current_iterations % _constants.storage_interval == 0) {
+        if (_constants.storage_interval != 0 &&
+            current_iterations % _constants.storage_interval == 0) {
             _archive.append_state(_double_grid[_grid_idx], current_iterations,
                                   current_iterations * _constants.time_step);
         }
@@ -83,7 +98,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                      current_iterations, avg_norm_delta);
         ++current_iterations;
     }
-    if ((current_iterations - 1) % _constants.storage_interval != 0) {
+    if (_constants.storage_interval != 0 &&
+        (current_iterations - 1) % _constants.storage_interval != 0) {
         _archive.append_state(_double_grid[_grid_idx], current_iterations,
                               current_iterations * _constants.time_step);
     }

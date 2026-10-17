@@ -14,14 +14,15 @@
 #include <cstddef>
 #include <cstdlib>
 #include <hdf5.h>
-#include <inplace_vector>
 #include <mpi.h>
 #include <multi/array.hpp>
 #include <ranges>
 #include <spdlog/spdlog.h>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 class DistributedStructuredGrid {
 public:
@@ -45,7 +46,8 @@ private:
     double _cell_size;
 
     // Boundary Condition
-    std::inplace_vector<NeumannApplicator<Subarray>, NDims * 2> _neumann_boundaries;
+    std::array<NeumannApplicator<Subarray>, NDims * 2> _neumann_boundaries;
+    unsigned _neumann_boundary_count;
 
     // MPI Information
     int _world_rank, _world_size;
@@ -85,10 +87,27 @@ public:
     ~DistributedStructuredGrid();
     auto synchronize() -> void;
     auto inner_coordinates() const {
-        return [&]<std::size_t... I>(std::index_sequence<I...>) {
-            return std::views::cartesian_product(
-                std::views::iota(1, _exterior_size[I] - 1)...);
-        }(std::make_index_sequence<NDims>{});
+        std::array<std::ptrdiff_t, NDims> sizes{};
+        std::size_t total{1};
+        for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
+            sizes[dim] = static_cast<std::ptrdiff_t>(_exterior_size[dim]) - 2;
+            total *= static_cast<std::size_t>(sizes[dim]);
+        }
+
+        auto decode = [sizes](std::size_t linear) {
+            std::array<std::ptrdiff_t, NDims> coordinate{};
+            std::size_t remaining{linear};
+            for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
+                coordinate[dim] =
+                    static_cast<std::ptrdiff_t>(
+                        remaining % static_cast<std::size_t>(sizes[dim])) +
+                    1;
+                remaining /= static_cast<std::size_t>(sizes[dim]);
+            }
+            return coordinate;
+        };
+        return std::views::iota(std::size_t{0}, total) |
+               std::views::transform(decode);
     }
     auto fill(double value) { std::ranges::fill(_inner_subarray.elements(), value); }
     auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }

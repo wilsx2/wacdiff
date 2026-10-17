@@ -2,6 +2,7 @@
 #include <H5Ppublic.h>
 #include <H5Tpublic.h>
 #include <hdf5.h>
+#include <concepts>
 #include <span>
 #include <string>
 #include <string_view>
