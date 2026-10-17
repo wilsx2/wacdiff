@@ -9,9 +9,27 @@
 #include <format>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+
+namespace {
+template <typename Array>
+auto format_array(const Array &values) -> std::string {
+    std::string result{"["};
+    bool first{true};
+    for (const auto &value : values) {
+        if (!first) {
+            result += ", ";
+        }
+        first = false;
+        result += std::format("{}", value);
+    }
+    result += ']';
+    return result;
+}
+} // namespace
 
 auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     -> void {
@@ -30,7 +48,8 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     MPI_Cart_coords(_cart_comm, _world_rank, NDims, _cart_coords.data());
     MPI_Cart_rank(_cart_comm, _cart_coords.data(), &_cart_rank);
     SPDLOG_DEBUG(std::format("World Rank {} -> Cart Rank {}; Coords: {}",
-                             _cart_rank, _world_rank, _cart_coords));
+                             _cart_rank, _world_rank,
+                             format_array(_cart_coords)));
 
     /// Find neighbors
     for (auto dim : std::views::iota(0, NDims)) {
@@ -53,7 +72,8 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     }
     SPDLOG_DEBUG(
         std::format("Rank {}: My partition starts at {} and has size {}",
-                    _cart_rank, _local_start, _local_size));
+                    _cart_rank, format_array(_local_start),
+                    format_array(_local_size)));
 }
 
 auto DistributedStructuredGrid::init_transfer_types() -> void {
