@@ -168,8 +168,19 @@ auto DistributedStructuredGrid::deinit_requests() -> void {
 template <std::size_t... I>
 auto DistributedStructuredGrid::create_subarray(std::array<int, NDims> from,
                                                 std::array<int, NDims> to,
-                                                std::index_sequence<I...>) {
+                                                std::index_sequence<I...>)
+    -> Subarray {
     return _mdarray(boost::multi::index_range{from[I], to[I]}...);
+}
+
+auto DistributedStructuredGrid::inner_subarray() -> Subarray {
+    std::array<int, NDims> inner_from, inner_to;
+    for (auto dim : std::views::iota(0, NDims)) {
+        inner_from[dim] = 1;
+        inner_to[dim] = _local_size[dim] + 1;
+    }
+    return create_subarray(inner_from, inner_to,
+                           std::make_index_sequence<NDims>{});
 }
 
 auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
@@ -267,14 +278,6 @@ DistributedStructuredGrid::DistributedStructuredGrid(
         },
         extensions)};
     _mdarray = boost::multi::array<double, NDims>(extents, default_value);
-    std::array<int, NDims> inner_from;
-    std::array<int, NDims> inner_to;
-    for (auto dim : std::views::iota(0, NDims)) {
-        inner_from[dim] = 1;
-        inner_to[dim] = _local_size[dim] + 1;
-    }
-    _inner_subarray = create_subarray(inner_from, inner_to,
-                                      std::make_index_sequence<NDims>{});
 
     init_transfer_types();
     set_local_boundaries(boundary_specification);

@@ -69,9 +69,9 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             next.apply(idx) = curr.apply(idx) + delta;
             total_norm_delta += delta * delta;
         }
+
         auto avg_norm_delta{total_norm_delta /
                             static_cast<double>(inner_coordinates.size())};
-        
         MPI_Allreduce(
             MPI_IN_PLACE,
             &avg_norm_delta,

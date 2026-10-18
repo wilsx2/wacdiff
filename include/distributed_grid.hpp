@@ -40,7 +40,6 @@ private:
     std::array<int32_t, NDims> _local_start;
     std::array<int32_t, NDims> _exterior_size;
     boost::multi::array<double, NDims> _mdarray;
-    Subarray _inner_subarray;
 
     // Metadata
     double _cell_size;
@@ -70,8 +69,12 @@ private:
     auto deinit_requests() -> void;
     template <std::size_t... I>
     auto create_subarray(std::array<int, NDims> from, std::array<int, NDims> to,
-                         std::index_sequence<I...>);
+                         std::index_sequence<I...>) -> Subarray;
     auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
+    /// Fresh view of the local interior region. Subarrays are ephemeral
+    /// proxies that must not outlive the array they reference, so the view
+    /// is rebuilt on demand rather than stored as a member.
+    auto inner_subarray() -> Subarray;
     auto set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
         -> void;
 
@@ -109,7 +112,7 @@ public:
         return std::views::iota(std::size_t{0}, total) |
                std::views::transform(decode);
     }
-    auto fill(double value) { std::ranges::fill(_inner_subarray.elements(), value); }
+    auto fill(double value) { std::ranges::fill(inner_subarray().elements(), value); }
     auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }
     auto local_grid() const -> const boost::multi::array<double, NDims> & {
         return _mdarray;
