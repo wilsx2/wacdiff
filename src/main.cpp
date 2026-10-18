@@ -119,6 +119,9 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    auto input_file{std::filesystem::absolute(
+                        program.get<std::string>("input"))
+                        .string()};
     auto output_path{program.get<std::string>("--output")};
     try {
         std::filesystem::create_directory(output_path);
@@ -152,7 +155,6 @@ int main(int argc, char *argv[]) {
     SPDLOG_TRACE("Initialized MPI.");
 
     try {
-        auto input_file{program.get<std::string>("input")};
         SPDLOG_TRACE(std::format("Parsing XML input file {}...", input_file));
         pugi::xml_document doc;
         std::ifstream stream{input_file};

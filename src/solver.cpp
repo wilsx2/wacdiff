@@ -33,6 +33,11 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     auto current_iterations{0u};
     auto converged{false};
 
+    if (_constants.storage_interval != 0) {
+        _archive.append_state(_double_grid[_grid_idx], current_iterations,
+                              current_iterations * _constants.time_step);
+    }
+
     // Perform simulation
     while (!converged) {
 
@@ -70,10 +75,11 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             total_norm_delta += delta * delta;
         }
 
-        auto avg_norm_delta{total_norm_delta /
-                            static_cast<double>(inner_coordinates.size())};
+        auto node_avg_norm_delta
+            {total_norm_delta / static_cast<double>(inner_coordinates.size())};
+        decltype(inner_avg_norm_delta) global_sum_avg_norm_delta;
         MPI_Allreduce(
-            MPI_IN_PLACE,
+            &global_sum_avg_norm_delta,
             &avg_norm_delta,
             1,
             MPI_DOUBLE,
@@ -81,26 +87,34 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             MPI_COMM_WORLD
         );
 
+        auto avg_norm_delta
+            {global_sum_avg_norm_delta / _double_grid.world_rank()};
+
         // Swap roles of current and next grids
         _grid_idx = !_grid_idx;
-
-        // Save
-        if (_constants.storage_interval != 0 &&
-            current_iterations % _constants.storage_interval == 0) {
-            _archive.append_state(_double_grid[_grid_idx], current_iterations,
-                                  current_iterations * _constants.time_step);
-        }
+        ++current_iterations;
 
         // Check convergence
         converged = avg_norm_delta < _constants.epsilon ||
                     current_iterations >= _constants.max_iterations;
         SPDLOG_TRACE("current_iterations={}, avg_norm_delta={}",
                      current_iterations, avg_norm_delta);
-        ++current_iterations;
+
+        // Save checkpoint
+        if (_constants.storage_interval != 0 &&
+            current_iterations % _constants.storage_interval == 0) {
+            _archive.append_state(_double_grid[_grid_idx], current_iterations,
+                                  current_iterations * _constants.time_step);
+        }
     }
+    // Make sure the final state is stored, unless it already landed on a
+    // checkpoint (keeping dataset names unique).
     if (_constants.storage_interval != 0 &&
-        (current_iterations - 1) % _constants.storage_interval != 0) {
+        current_iterations % _constants.storage_interval != 0) {
         _archive.append_state(_double_grid[_grid_idx], current_iterations,
                               current_iterations * _constants.time_step);
     }
+
+    SPDLOG_INFO("Simulation finished: {} iterations, t = {}.",
+                current_iterations, current_iterations * _constants.time_step);
 }
