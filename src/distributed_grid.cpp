@@ -141,6 +141,8 @@ auto DistributedStructuredGrid::deinit_transfer_types() -> void {
 }
 
 auto DistributedStructuredGrid::init_requests() -> void {
+    _requests_in_flight = false;
+
     for (auto dim : std::views::iota(0, NDims)) {
         auto neighbors{_cart_neighbors[dim]};
 
@@ -290,11 +292,20 @@ DistributedStructuredGrid::~DistributedStructuredGrid() {
     MPI_Comm_free(&_cart_comm);
 }
 
-auto DistributedStructuredGrid::synchronize() -> void {
-    MPI_Startall(_requests.size(), _requests.data());
-    for (auto i = 0u; i < _neumann_boundary_count; ++i) {
-        _neumann_boundaries[i].apply();
+auto DistributedStructuredGrid::begin_halo_exchange() -> void {
+    if (!_requests_in_flight) {
+        MPI_Startall(_requests.size(), _requests.data());
+        _requests_in_flight = true;
     }
-    std::array<MPI_Status, _requests.size()> statuses;
-    MPI_Waitall(_requests.size(), _requests.data(), statuses.data());
+}
+
+auto DistributedStructuredGrid::await_halo_exchange() -> void {
+    if (_requests_in_flight) {
+        for (auto i = 0u; i < _neumann_boundary_count; ++i) {
+            _neumann_boundaries[i].apply();
+        }
+        std::array<MPI_Status, _requests.size()> statuses;
+        MPI_Waitall(_requests.size(), _requests.data(), statuses.data());
+        _requests_in_flight = false;
+    }
 }

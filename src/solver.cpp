@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <format>
 #include <numeric>
@@ -33,6 +34,27 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     auto current_iterations{0u};
     auto converged{false};
 
+    constexpr auto NDims{DistributedStructuredGrid::NDims};
+    constexpr auto NumNeighbors{NDims * 2};
+
+    // Compute shell coordinates (adjacent to and depending on halo)
+    std::vector<std::array<std::ptrdiff_t, NDims>> shell_coords;
+    {
+        const auto &local_size{_double_grid[0].local_size()};
+        for (auto idx : _double_grid[0].inner_coordinates()) {
+            auto on_shell{false};
+            for (auto dim = 0; dim < NDims; ++dim) {
+                if (idx[dim] == 1 || idx[dim] == local_size[dim]) {
+                    on_shell = true;
+                    break;
+                }
+            }
+            if (on_shell) {
+                shell_coords.push_back(idx);
+            }
+        }
+    }
+
     if (_constants.storage_interval != 0) {
         _archive.append_state(_double_grid[_grid_idx], current_iterations,
                               current_iterations * _constants.time_step);
@@ -40,19 +62,12 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
     // Perform simulation
     while (!converged) {
-
-        // Conditionally perform halo exchange / apply boundary condition
-        _double_grid[_grid_idx].synchronize();
-
-        // Solve
-        double total_norm_delta{0};
         auto &curr{_double_grid[_grid_idx].local_grid()};
         auto &next{_double_grid[!_grid_idx].local_grid()};
-        auto inner_coordinates{_double_grid[_grid_idx].inner_coordinates()};
-        constexpr auto NDims{DistributedStructuredGrid::NDims};
-#pragma omp parallel for reduction(+ : total_norm_delta)
-        for (auto idx : inner_coordinates) {
-            constexpr auto NumNeighbors{NDims * 2};
+
+        _double_grid[_grid_idx].begin_halo_exchange();
+
+        auto apply_stencil{[&](const std::array<std::ptrdiff_t, NDims> &idx) {
             double neighbor_sum{0};
             static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
             [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
@@ -72,23 +87,39 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                        (neighbor_sum -
                         static_cast<double>(NumNeighbors) * curr.apply(idx))};
             next.apply(idx) = curr.apply(idx) + delta;
-            total_norm_delta += delta * delta;
+            return delta * delta;
+        }};
+
+        // Halo-independent interior cells.
+        double interior_norm_delta{0};
+#pragma omp parallel for reduction(+ : interior_norm_delta)
+        for (auto idx : _double_grid[_grid_idx].interior_coordinates()) {
+            interior_norm_delta += apply_stencil(idx);
         }
 
-        auto node_avg_norm_delta
-            {total_norm_delta / static_cast<double>(inner_coordinates.size())};
-        decltype(node_avg_norm_delta) global_sum_avg_norm_delta;
-        MPI_Allreduce(
-            &global_sum_avg_norm_delta,
-            &node_avg_norm_delta,
-            1,
-            MPI_DOUBLE,
-            MPI_SUM,
-            MPI_COMM_WORLD
-        );
+        // Halos are valid now; finish the shell cells that read them.
+        _double_grid[_grid_idx].await_halo_exchange();
+        assert(!_double_grid[_grid_idx].requests_in_flight());
 
-        auto avg_norm_delta
-            {global_sum_avg_norm_delta / _double_grid[_grid_idx].world_rank()};
+        auto shell_norm_delta{0.0};
+#pragma omp parallel for reduction(+ : shell_norm_delta)
+        for (const auto &idx : shell_coords) {
+            shell_norm_delta += apply_stencil(idx);
+        }
+
+        auto total_norm_delta{interior_norm_delta + shell_norm_delta};
+        const auto inner_count{
+            shell_coords.size() +
+            _double_grid[_grid_idx].interior_coordinates().size()};
+
+        auto node_avg_norm_delta{
+            total_norm_delta / static_cast<double>(inner_count)};
+        auto global_sum_avg_norm_delta{0.0};
+        MPI_Allreduce(&node_avg_norm_delta, &global_sum_avg_norm_delta, 1,
+                      MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+        auto avg_norm_delta{global_sum_avg_norm_delta /
+                            _double_grid[_grid_idx].world_size()};
 
         // Swap roles of current and next grids
         _grid_idx = !_grid_idx;

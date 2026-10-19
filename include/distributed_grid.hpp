@@ -60,6 +60,7 @@ private:
     std::array<std::pair<MPI_Datatype, MPI_Datatype>, NDims>
         _exterior_face_types;
     std::array<MPI_Request, NDims * 4> _requests;
+    bool _requests_in_flight;
 
     // Methods
     auto init_topology(std::span<int, NDims> periods) -> void;
@@ -71,9 +72,6 @@ private:
     auto create_subarray(std::array<int, NDims> from, std::array<int, NDims> to,
                          std::index_sequence<I...>) -> Subarray;
     auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
-    /// Fresh view of the local interior region. Subarrays are ephemeral
-    /// proxies that must not outlive the array they reference, so the view
-    /// is rebuilt on demand rather than stored as a member.
     auto inner_subarray() -> Subarray;
     auto set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
         -> void;
@@ -88,7 +86,11 @@ public:
         BoundaryConditions boundary_specification,
         double block_size = 1, double default_value = 0);
     ~DistributedStructuredGrid();
-    auto synchronize() -> void;
+    auto begin_halo_exchange() -> void;
+    auto await_halo_exchange() -> void;
+    auto requests_in_flight() -> bool {
+        return _requests_in_flight;
+    }
     auto inner_coordinates() const {
         std::array<std::ptrdiff_t, NDims> sizes{};
         std::size_t total{1};
@@ -105,6 +107,33 @@ public:
                     static_cast<std::ptrdiff_t>(
                         remaining % static_cast<std::size_t>(sizes[dim])) +
                     1;
+                remaining /= static_cast<std::size_t>(sizes[dim]);
+            }
+            return coordinate;
+        };
+        return std::views::iota(std::size_t{0}, total) |
+               std::views::transform(decode);
+    }
+    /// Inner cells whose stencil does not reach into the halo. This is the
+    /// inner region shrunk by one on every side (indices 2 .. local_size-1),
+    /// and it is empty when any local dimension is smaller than 3.
+    auto interior_coordinates() const {
+        std::array<std::ptrdiff_t, NDims> sizes{};
+        std::size_t total{1};
+        for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
+            sizes[dim] = std::max<std::ptrdiff_t>(
+                0, static_cast<std::ptrdiff_t>(_exterior_size[dim]) - 4);
+            total *= static_cast<std::size_t>(sizes[dim]);
+        }
+
+        auto decode = [sizes](std::size_t linear) {
+            std::array<std::ptrdiff_t, NDims> coordinate{};
+            std::size_t remaining{linear};
+            for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
+                coordinate[dim] =
+                    static_cast<std::ptrdiff_t>(
+                        remaining % static_cast<std::size_t>(sizes[dim])) +
+                    2;
                 remaining /= static_cast<std::size_t>(sizes[dim]);
             }
             return coordinate;
@@ -130,6 +159,7 @@ public:
 
     auto comm() const -> MPI_Comm { return _cart_comm; }
     auto world_rank() const -> int { return _world_rank; }
+    auto world_size() const -> int { return _world_size; }
 };
 
 class DSGArchive : public Archive<DistributedStructuredGrid> {
