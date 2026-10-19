@@ -11,14 +11,13 @@ weak scaling, nodes
     n=0..6: nodes(2^n), cpus(8), size(round(256 * 2^{n/3}))
 weak scaling, cpus
     n=0..6: nodes(8), cpus(2^n), size(round(256 * 2^{n/3}))
-io overhead
+io scaling
     n=0..6: nodes(2^n), cpus(8), size(512), checkpoint(32)
 """
 
 from dataclasses import dataclass
 
 # Constants we may be interested in tuning.
-REPETITIONS = 3
 MAX_ITERATIONS = 1_024        # 2_048 gives >= ~30s at the largest scale
 SCALE = 0.1
 STRONG_SIZE = 512             # strong-scaling global grid (per dimension)
@@ -39,8 +38,10 @@ class Sweeps:
     strong_scaling_cpu: list[Run]
     weak_scaling_node: list[Run]
     weak_scaling_cpu: list[Run]
-    io_overhead: list[Run]
+    io_scaling: list[Run]
 
+def generate_name(run: Run):
+    return f"wacdiff-N{run.nodes}-C{run.cpus_per_node}-S{run.size}-IO{io_frequency}"
 
 def generate_sweeps() -> Sweeps:
     sweeps = Sweeps([], [], [], [], [])
@@ -50,7 +51,7 @@ def generate_sweeps() -> Sweeps:
         sweeps.strong_scaling_cpu.append(Run(8, 2**n, STRONG_SIZE))
         sweeps.weak_scaling_node.append(Run(2**n, 8, weak_size))
         sweeps.weak_scaling_cpu.append(Run(8, 2**n, weak_size))
-        sweeps.io_overhead.append(Run(2**n, 8, STRONG_SIZE, IO_FREQUENCY))
+        sweeps.io_scaling.append(Run(2**n, 8, STRONG_SIZE, IO_FREQUENCY))
     return sweeps
 
 
@@ -76,7 +77,7 @@ def generate_input(run: Run) -> str:
 
     <!-- type="constant": single value; type="expr": f(x, y, z) expression -->
     <initial_conditions type="expr">
-        if ((x^2 + y^2 + z^2)^(1/2) &lt; {run.size}/2 * {SCALE}) 0; else 100;
+        ((x - {run.size / 2 * SCALE})^2 + (y - {run.size / 2 * SCALE})^2 + (z - {run.size / 2 * SCALE})^2)^(1/2)
     </initial_conditions>
 
     <boundary_conditions>
@@ -93,6 +94,46 @@ def generate_input(run: Run) -> str:
 </simulation>"""
     return input_string
 
+def generate_batch_script(run: Run) -> str:
+    name = generate_name(run)
+    script_contents = f"""#!/bin/bash
+#SBATCH --job-name={name}
+#SBATCH --output=slurm-{name}-%j.out
+#SBATCH --error=slurm-{name}-%j.err
+#SBATCH --time=
+#SBATCH --ntasks={run.nodes}
+#SBATCH --cpus-per-task={run.cpus_per_node}
+
+module load gcc/11.3.0
+module load openmpi/gcc/11.3.0/zen2/
+module load hdf5/gcc/11.3.0/openmpi/4.1.5/zen2/
+
+srun /tmp/wacdiff/build/wacdiff /tmp/wacdiff/inputs/{name}.xml -o /tmp/wacdiff/outputs/{name}
+"""
+
+def write_sweep_files(sweeps: Sweeps):
+    scratch_dir = "/tmp/wacdiff"
+    sweep_attrs = [
+        "strong_scaling_node",
+        "strong_scaling_cpu",
+        "weak_scaling_node",
+        "weak_scaling_cpu",
+        "io_scaling"
+    ]
+
+    os.makedirs(f"{scratch_dir}/inputs", exist_ok=True)
+    os.makedirs(f"{scratch_dir}/outputs", exist_ok=True)
+    os.makedirs(f"{scratch_dir}/sbatch", exist_ok=True)
+    for attr in sweep_attrs:
+        runs = getattr(sweeps, attr)
+        for run in runs:
+            name = generate_name(run)
+            with open(f"{scratch_dir}/inputs/{name}.xml", "w", encoding="utf-8") as file:
+                content = generate_input(run)
+                file.write(content)
+            with open(f"{scratch_dir}/sbatch/{name}.sh", "w", encoding="utf-8") as file:
+                content = generate_batch_script(run)
+                file.write(content)
 
 def main():
     pass
