@@ -77,10 +77,10 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
         auto node_avg_norm_delta
             {total_norm_delta / static_cast<double>(inner_coordinates.size())};
-        decltype(inner_avg_norm_delta) global_sum_avg_norm_delta;
+        decltype(node_avg_norm_delta) global_sum_avg_norm_delta;
         MPI_Allreduce(
             &global_sum_avg_norm_delta,
-            &avg_norm_delta,
+            &node_avg_norm_delta,
             1,
             MPI_DOUBLE,
             MPI_SUM,
@@ -88,7 +88,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         );
 
         auto avg_norm_delta
-            {global_sum_avg_norm_delta / _double_grid.world_rank()};
+            {global_sum_avg_norm_delta / _double_grid[_grid_idx].world_rank()};
 
         // Swap roles of current and next grids
         _grid_idx = !_grid_idx;
