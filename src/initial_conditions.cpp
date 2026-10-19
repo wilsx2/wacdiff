@@ -80,7 +80,8 @@ auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const
         [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
             ([&] {
                 std::get<Ds>(_impl->coordinate) =
-                    static_cast<double>(std::get<Ds>(coordinate)) *
+                    (static_cast<double>(domain.local_start()[Ds]) +
+                     static_cast<double>(std::get<Ds>(coordinate))) *
                     domain.cell_size();
             }(), ...);
         }(DimSeq);

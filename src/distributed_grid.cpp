@@ -236,10 +236,8 @@ auto DistributedStructuredGrid::set_local_boundaries(
         } else {
             const auto *neumann{std::get_if<NeumannBoundary>(&boundary)};
             assert(neumann != nullptr);
-            _neumann_boundaries[_neumann_boundary_count++]
-                = {neumann->delta,
-                   std::move(exterior_face),
-                   std::move(interior_face)};
+            _neumann_boundaries[_neumann_boundary_count++] = {
+                neumann->delta, axis, end};
         }
     }};
 
@@ -302,7 +300,11 @@ auto DistributedStructuredGrid::begin_halo_exchange() -> void {
 auto DistributedStructuredGrid::await_halo_exchange() -> void {
     if (_requests_in_flight) {
         for (auto i = 0u; i < _neumann_boundary_count; ++i) {
-            _neumann_boundaries[i].apply();
+            const auto &face{_neumann_boundaries[i]};
+            NeumannApplicator{face.delta,
+                              get_face(face.axis, face.end, FaceKind::Exterior),
+                              get_face(face.axis, face.end, FaceKind::Interior)}
+                .apply();
         }
         std::array<MPI_Status, _requests.size()> statuses;
         MPI_Waitall(_requests.size(), _requests.data(), statuses.data());

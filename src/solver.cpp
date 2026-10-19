@@ -138,8 +138,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                                   current_iterations * _constants.time_step);
         }
     }
-    // Make sure the final state is stored, unless it already landed on a
-    // checkpoint (keeping dataset names unique).
+    // Make sure the final state is stored
     if (_constants.storage_interval != 0 &&
         current_iterations % _constants.storage_interval != 0) {
         _archive.append_state(_double_grid[_grid_idx], current_iterations,

@@ -45,7 +45,12 @@ private:
     double _cell_size;
 
     // Boundary Condition
-    std::array<NeumannApplicator<Subarray>, NDims * 2> _neumann_boundaries;
+    struct NeumannFace {
+        double delta;
+        int axis;
+        FaceEnd end;
+    };
+    std::array<NeumannFace, NDims * 2> _neumann_boundaries;
     unsigned _neumann_boundary_count;
 
     // MPI Information
