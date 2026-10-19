@@ -15,6 +15,7 @@ io scaling
     n=0..6: nodes(2^n), cpus(8), size(512), checkpoint(32)
 """
 
+import os
 from dataclasses import dataclass
 
 # Constants we may be interested in tuning.
@@ -41,7 +42,7 @@ class Sweeps:
     io_scaling: list[Run]
 
 def generate_name(run: Run):
-    return f"wacdiff-N{run.nodes}-C{run.cpus_per_node}-S{run.size}-IO{io_frequency}"
+    return f"wacdiff-N{run.nodes}-C{run.cpus_per_node}-S{run.size}-IO{run.io_frequency}"
 
 def generate_sweeps() -> Sweeps:
     sweeps = Sweeps([], [], [], [], [])
@@ -108,11 +109,11 @@ module load gcc/11.3.0
 module load openmpi/gcc/11.3.0/zen2/
 module load hdf5/gcc/11.3.0/openmpi/4.1.5/zen2/
 
-srun /tmp/wacdiff/build/wacdiff /tmp/wacdiff/inputs/{name}.xml -o /tmp/wacdiff/outputs/{name}
+srun build/wacdiff inputs/{name}.xml -o outputs/{name}
 """
+    return script_contents
 
 def write_sweep_files(sweeps: Sweeps):
-    scratch_dir = "/tmp/wacdiff"
     sweep_attrs = [
         "strong_scaling_node",
         "strong_scaling_cpu",
@@ -121,22 +122,23 @@ def write_sweep_files(sweeps: Sweeps):
         "io_scaling"
     ]
 
-    os.makedirs(f"{scratch_dir}/inputs", exist_ok=True)
-    os.makedirs(f"{scratch_dir}/outputs", exist_ok=True)
-    os.makedirs(f"{scratch_dir}/sbatch", exist_ok=True)
+    os.makedirs(f"inputs", exist_ok=True)
+    os.makedirs(f"outputs", exist_ok=True)
+    os.makedirs(f"sbatch", exist_ok=True)
     for attr in sweep_attrs:
         runs = getattr(sweeps, attr)
         for run in runs:
             name = generate_name(run)
-            with open(f"{scratch_dir}/inputs/{name}.xml", "w", encoding="utf-8") as file:
+            with open(f"inputs/{name}.xml", "w", encoding="utf-8") as file:
                 content = generate_input(run)
                 file.write(content)
-            with open(f"{scratch_dir}/sbatch/{name}.sh", "w", encoding="utf-8") as file:
+            with open(f"sbatch/{name}.sh", "w", encoding="utf-8") as file:
                 content = generate_batch_script(run)
                 file.write(content)
 
 def main():
-    pass
+    sweeps = generate_sweeps()
+    write_sweep_files(sweeps)
 
 if __name__ == "__main__":
     main()
