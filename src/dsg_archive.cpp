@@ -44,8 +44,6 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
 
     grid.append_child("Time").append_attribute("Value").set_value(
         std::to_string(time));
-    grid.append_child("Step").append_attribute("Value").set_value(
-        std::to_string(step));
 
     {
         static const std::string point_dimensions_string(
