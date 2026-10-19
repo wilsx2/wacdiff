@@ -130,6 +130,7 @@ Each run produces two files in the output directory:
 | `sim.xmf` | XDMF XML metadata linking the HDF5 data to mesh geometry |
 
 The XDMF file can be opened directly in **ParaView** or **VisIt** to visualize the time series.
+Note: When in ParaView, apply the Point Data to Cell Data filter.
 
 ## License
 
