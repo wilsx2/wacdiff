@@ -12,11 +12,11 @@
 #include <spdlog/spdlog.h>
 
 #include <cstdlib>
-#include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <string_view>
 
 template <typename InitialConditions>
@@ -35,7 +35,7 @@ auto parse_config(const pugi::xml_node &sim)
     auto dimensions{required_child(grid, "dimensions")};
     for (auto dim : std::views::iota(0, NDims)) {
         config.domain_size[dim] =
-            child_value<int>(dimensions, std::format("dim{}", dim));
+            child_value<int>(dimensions, "dim" + std::to_string(dim));
     }
 
     config.initial_conditions =
@@ -44,7 +44,7 @@ auto parse_config(const pugi::xml_node &sim)
     auto boundary_conditions{required_child(sim, "boundary_conditions")};
     for (auto dim : std::views::iota(0, NDims)) {
         auto axis{
-            required_child(boundary_conditions, std::format("axis{}", dim))};
+            required_child(boundary_conditions, "axis" + std::to_string(dim))};
         std::string_view axis_type{axis.ensure_attribute("type").value()};
         if (axis_type == "periodic") {
             config.boundary_conditions[dim] = PeriodicBoundary{};
@@ -62,9 +62,9 @@ auto parse_config(const pugi::xml_node &sim)
                     face = NeumannBoundary{child_value<double>(axis, name)};
                 } else {
                     throw ConfigError{
-                        std::format("Boundary type \"{}\" not recognized, only "
-                                    "\"dirichlet\" and \"neumann\" are valid.",
-                                    face_type)};
+                        "Boundary type \"" + std::string(face_type) +
+                        "\" not recognized, only \"dirichlet\" and \"neumann\" "
+                        "are valid."};
                 }
             }
 
@@ -77,7 +77,7 @@ auto parse_config(const pugi::xml_node &sim)
         child_value<unsigned>(convergence, "iterations_under");
     config.epsilon = child_value<double>(convergence, "avg_delta_over");
 
-    SPDLOG_TRACE(std::format("XML input file parsed"));
+    SPDLOG_TRACE("XML input file parsed");
     return config;
 }
 
@@ -112,10 +112,9 @@ inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
         return solve<ExpressionInitialConditions>(sim);
     }
 
-    throw ConfigError{
-        std::format("Unsupported initial condition type \"{}\", only "
-                    "\"constant\" and \"expr\" are supported",
-                    ic_type)};
+    throw ConfigError{"Unsupported initial condition type \"" +
+                      std::string(ic_type) +
+                      "\", only \"constant\" and \"expr\" are supported"};
 }
 
 int main(int argc, char *argv[]) {
@@ -146,8 +145,8 @@ int main(int argc, char *argv[]) {
         std::filesystem::create_directory(output_path);
         std::filesystem::current_path(output_path);
     } catch (const std::exception &err) {
-        std::cerr << std::format("Directory '{}' failed to create or enter\n",
-                                 output_path);
+        std::cerr << "Directory '" << output_path
+                  << "' failed to create or enter\n";
         return EXIT_FAILURE;
     }
 
@@ -174,14 +173,13 @@ int main(int argc, char *argv[]) {
     SPDLOG_TRACE("Initialized MPI.");
 
     try {
-        SPDLOG_TRACE(std::format("Parsing XML input file {}...", input_file));
+        SPDLOG_TRACE("Parsing XML input file " + input_file + "...");
         pugi::xml_document doc;
         std::ifstream stream{input_file};
         pugi::xml_parse_result result = doc.load(stream);
         if (!result) {
-            throw ConfigError{
-                std::format("Failed to load input file \"{}\": {}", input_file,
-                            result.description())};
+            throw ConfigError{"Failed to load input file \"" + input_file +
+                              "\": " + result.description()};
         }
 
         auto sim{doc.child("simulation")};

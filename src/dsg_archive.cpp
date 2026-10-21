@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <format>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -48,7 +47,7 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
     {
         static const std::string point_dimensions_string(
             join_transformed(state.global_size(), [](auto size) {
-                return std::format("{}", size + 1);
+                return std::to_string(size + 1);
             }));
 
         auto topology(grid.append_child("Topology"));
@@ -71,7 +70,7 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
         }
         {
             static const std::string ndim_block_sizes(
-                repeat_joined(std::format("{}", _block_size),
+                repeat_joined(std::to_string(_block_size),
                               static_cast<std::size_t>(NDims)));
             auto delta{geometry.append_child("DataItem")};
             delta.append_attribute("Dimensions").set_value(NDims);
@@ -87,7 +86,7 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
         {
             static const std::string cell_dimensions_string(
                 join_transformed(state.global_size(), [](auto size) {
-                    return std::format("{}", size);
+                    return std::to_string(size);
                 }));
 
             auto data_item{attr.append_child("DataItem")};
@@ -97,7 +96,7 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
             data_item.append_attribute("Precision").set_value(8);
             data_item.append_attribute("Format").set_value("HDF");
             data_item.text().set(
-                std::format("{}:/{}", this->_heavy_data_filename, step));
+                this->_heavy_data_filename + ":/" + std::to_string(step));
         }
     }
 }

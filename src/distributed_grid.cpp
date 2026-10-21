@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
-#include <format>
 #include <ranges>
 #include <span>
 #include <string>
@@ -24,7 +23,7 @@ auto format_array(const Array &values) -> std::string {
             result += ", ";
         }
         first = false;
-        result += std::format("{}", value);
+        result += std::to_string(value);
     }
     result += ']';
     return result;
@@ -47,9 +46,9 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     /// Find coordinates
     MPI_Cart_coords(_cart_comm, _world_rank, NDims, _cart_coords.data());
     MPI_Cart_rank(_cart_comm, _cart_coords.data(), &_cart_rank);
-    SPDLOG_DEBUG(std::format("World Rank {} -> Cart Rank {}; Coords: {}",
-                             _cart_rank, _world_rank,
-                             format_array(_cart_coords)));
+    SPDLOG_DEBUG("World Rank " + std::to_string(_cart_rank) +
+                 " -> Cart Rank " + std::to_string(_world_rank) +
+                 "; Coords: " + format_array(_cart_coords));
 
     /// Find neighbors
     for (auto dim : std::views::iota(0, NDims)) {
@@ -70,10 +69,9 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
                                : _global_size[dim] - _local_start[dim];
         _exterior_size[dim] = _local_size[dim] + 2;
     }
-    SPDLOG_DEBUG(
-        std::format("Rank {}: My partition starts at {} and has size {}",
-                    _cart_rank, format_array(_local_start),
-                    format_array(_local_size)));
+    SPDLOG_DEBUG("Rank " + std::to_string(_cart_rank) +
+                 ": My partition starts at " + format_array(_local_start) +
+                 " and has size " + format_array(_local_size));
 }
 
 auto DistributedStructuredGrid::init_transfer_types() -> void {

@@ -2,9 +2,9 @@
 
 #include "input.hpp"
 #include <exprtk.hpp>
-#include <format>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -33,9 +33,10 @@ void ExpressionInitialConditions::compile() {
     _impl->expression.register_symbol_table(_impl->symbol_table);
 
     if (!_impl->parser.compile(_impl->expression_text, _impl->expression)) {
-        throw std::runtime_error(std::format(
-            "Arithmetic expression \"{}\" failed to parse: {}",
-            _impl->expression_text, _impl->parser.error()));
+        throw std::runtime_error("Arithmetic expression \"" +
+                                 _impl->expression_text +
+                                 "\" failed to parse: " +
+                                 _impl->parser.error());
     }
 }
 

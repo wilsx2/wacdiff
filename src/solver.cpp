@@ -6,7 +6,6 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
-#include <format>
 #include <numeric>
 #include <ranges>
 #include <utility>

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <format>
 #include <fstream>
 #include <multi/array_ref.hpp>
 #include <string>
@@ -13,11 +12,12 @@ struct PPM {
 inline auto serialize(std::ostream &file, const boost::multi::array<double, 2> &array,
                 const PPM &ppm) {
     auto [is, js] = array.extents();
-    file << std::format("P3\n{} {}\n{}\n", is.size(), js.size(), ppm.max_value);
+    file << "P3\n" << is.size() << " " << js.size() << "\n" << ppm.max_value
+         << "\n";
     for (auto j : js) { // WARN: Inefficient iteration order
         for (auto i : is) {
             auto value{static_cast<unsigned>(array[j][i])};
-            file << std::format("{} {} {} ", value, value, value);
+            file << value << " " << value << " " << value << " ";
         }
         file << "\n";
     }

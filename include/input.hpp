@@ -5,7 +5,6 @@
 
 #include <charconv>
 #include <concepts>
-#include <format>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -24,8 +23,8 @@ inline auto required_child(const pugi::xml_node &node,
     if (auto child{node.child(child_name.data())}; child) {
         return child;
     }
-    throw ConfigError{std::format("Missing required element <{}> in <{}>",
-                                  child_name, node.name())};
+    throw ConfigError{"Missing required element <" + std::string(child_name) +
+                       "> in <" + node.name() + ">"};
 }
 
 template <typename T>
@@ -34,7 +33,8 @@ auto parse_value(std::string_view text) -> T {
     auto [ptr,
           ec]{std::from_chars(text.data(), text.data() + text.size(), value)};
     if (ec != std::errc{} || ptr != text.data() + text.size()) {
-        throw ConfigError{std::format("Expected a number, got \"{}\"", text)};
+        throw ConfigError{"Expected a number, got \"" + std::string(text) +
+                           "\""};
     }
     return value;
 }
@@ -73,18 +73,20 @@ inline auto child_pair(const pugi::xml_node &node, std::string_view child_name)
     auto token_it{tokens.begin()};
     for (auto &value : values) {
         if (token_it == tokens.end()) {
-            throw ConfigError{std::format("Failed to parse <{}> in <{}>: "
-                                          "expected two numbers, got \"{}\"",
-                                          child_name, node.name(), text)};
+            throw ConfigError{"Failed to parse <" + std::string(child_name) +
+                              "> in <" + node.name() +
+                              ">: expected two numbers, got \"" +
+                              std::string(text) + "\""};
         }
         auto token{*token_it};
         value = parse_value<double>(std::string_view{token.begin(), token.end()});
         ++token_it;
     }
     if (token_it != tokens.end()) {
-        throw ConfigError{std::format(
-            "Failed to parse <{}> in <{}>: expected two numbers, got \"{}\"",
-            child_name, node.name(), text)};
+        throw ConfigError{"Failed to parse <" + std::string(child_name) +
+                          "> in <" + node.name() +
+                          ">: expected two numbers, got \"" +
+                          std::string(text) + "\""};
     }
     return {values[0], values[1]};
 }
