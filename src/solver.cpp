@@ -60,6 +60,9 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                               current_iterations * _constants.time_step);
     }
 
+    const auto interior_coords{_double_grid[0].interior_coordinates()};
+    const auto inner_count{shell_coords.size() + interior_coords.size()};
+
     // Perform simulation
     while (!converged) {
         auto &curr{_double_grid[_grid_idx].local_grid()};
@@ -102,7 +105,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             interior_norm_delta = 0.0;
 #pragma omp parallel for reduction(+ : interior_norm_delta)
-            for (auto idx : _double_grid[_grid_idx].interior_coordinates()) {
+            for (auto idx : interior_coords) {
                 interior_norm_delta += apply_stencil(idx);
             }
         }
@@ -129,9 +132,6 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             }
 
             auto total_norm_delta{interior_norm_delta + shell_norm_delta};
-            const auto inner_count{
-                shell_coords.size() +
-                _double_grid[_grid_idx].interior_coordinates().size()};
 
             node_avg_norm_delta =
                 total_norm_delta / static_cast<double>(inner_count);
