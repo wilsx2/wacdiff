@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <ranges>
 #include <variant>
 
 struct DirichletBoundary {
@@ -24,7 +23,7 @@ struct PeriodicBoundary {};
 enum class FaceEnd  { First, Last };
 enum class FaceKind { Interior, Exterior };
 
-template <std::ranges::range Region>
+template <typename Region>
 struct DirichletApplicator {
     double value;
     Region region;
@@ -37,7 +36,7 @@ struct DirichletApplicator {
     }
 };
 
-template <std::ranges::range Region>
+template <typename Region>
 struct NeumannApplicator {
     double delta;
     Region target;
@@ -51,3 +50,9 @@ struct NeumannApplicator {
         }
     }
 };
+
+template <typename Region>
+DirichletApplicator(double, Region) -> DirichletApplicator<Region>;
+
+template <typename Region>
+NeumannApplicator(double, Region, Region) -> NeumannApplicator<Region>;

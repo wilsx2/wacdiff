@@ -11,11 +11,11 @@
 #include <mpi.h>
 #include <spdlog/spdlog.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
-#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -33,7 +33,7 @@ auto parse_config(const pugi::xml_node &sim)
     config.time_step = child_value<double>(grid, "time_step");
     config.space_step = child_value<double>(grid, "cell_size");
     auto dimensions{required_child(grid, "dimensions")};
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         config.domain_size[dim] =
             child_value<int>(dimensions, "dim" + std::to_string(dim));
     }
@@ -42,7 +42,7 @@ auto parse_config(const pugi::xml_node &sim)
         InitialConditions{child_text(sim, "initial_conditions")};
 
     auto boundary_conditions{required_child(sim, "boundary_conditions")};
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         auto axis{
             required_child(boundary_conditions, "axis" + std::to_string(dim))};
         std::string_view axis_type{axis.ensure_attribute("type").value()};

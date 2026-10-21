@@ -6,8 +6,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
-#include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -30,7 +28,7 @@ auto format_array(const Array &values) -> std::string {
 }
 } // namespace
 
-auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
+auto DistributedStructuredGrid::init_topology(std::array<int, NDims> &periods)
     -> void {
     /// Cartesian grid
     std::fill(_cart_dims.begin(), _cart_dims.end(), 0);
@@ -51,7 +49,7 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
                  "; Coords: " + format_array(_cart_coords));
 
     /// Find neighbors
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         MPI_Cart_shift(_cart_comm, dim, 1, &_cart_neighbors[dim].first,
                        &_cart_neighbors[dim].second);
         SPDLOG_DEBUG(
@@ -61,7 +59,7 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
     }
 
     // Initialize local grid
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         auto unit_size{std::floor(_global_size[dim] / _cart_dims[dim])};
         _local_start[dim] = _cart_coords[dim] * unit_size;
         _local_size[dim] = (_cart_coords[dim] < _cart_dims[dim] - 1)
@@ -77,14 +75,14 @@ auto DistributedStructuredGrid::init_topology(std::span<int, NDims> periods)
 auto DistributedStructuredGrid::init_transfer_types() -> void {
     MPI_Datatype element_type;
     MPI_Type_match_size(MPI_TYPECLASS_REAL, sizeof(double), &element_type);
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         std::array<int, NDims> interior_face_subsizes;
         std::array<int, NDims> exterior_face_subsizes;
         std::pair<std::array<int, NDims>, std::array<int, NDims>>
             interior_face_starts;
         std::pair<std::array<int, NDims>, std::array<int, NDims>>
             exterior_face_starts;
-        for (auto odim : std::views::iota(0, NDims)) {
+        for (std::ptrdiff_t odim = 0; odim < NDims; ++odim) {
             // NOTE: May be improved with a disjoint fill and assignment at
             // [dim]
             if (dim == odim) {
@@ -130,7 +128,7 @@ auto DistributedStructuredGrid::init_transfer_types() -> void {
 }
 
 auto DistributedStructuredGrid::deinit_transfer_types() -> void {
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         MPI_Type_free(&_interior_face_types[dim].first);
         MPI_Type_free(&_exterior_face_types[dim].first);
         MPI_Type_free(&_interior_face_types[dim].second);
@@ -141,7 +139,7 @@ auto DistributedStructuredGrid::deinit_transfer_types() -> void {
 auto DistributedStructuredGrid::init_requests() -> void {
     _requests_in_flight = false;
 
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         auto neighbors{_cart_neighbors[dim]};
 
         MPI_Send_init(_mdarray.base(), 1, _interior_face_types[dim].first,
@@ -175,7 +173,7 @@ auto DistributedStructuredGrid::create_subarray(std::array<int, NDims> from,
 
 auto DistributedStructuredGrid::inner_subarray() -> Subarray {
     std::array<int, NDims> inner_from, inner_to;
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         inner_from[dim] = 1;
         inner_to[dim] = _local_size[dim] + 1;
     }
@@ -189,12 +187,12 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
     std::array<int, NDims> to;
     if (kind == FaceKind::Interior) {
         if (end == FaceEnd::First) {
-            for (auto dim : std::views::iota(0, NDims)) {
+            for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
                 from[dim] = 1;
                 to[dim] = (dim == axis) ? 2 : _exterior_size[dim] - 1;
             }
         } else {
-            for (auto dim : std::views::iota(0, NDims)) {
+            for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
                 to[dim] = _exterior_size[dim] - 1;
                 from[dim] = (dim == axis) ? _exterior_size[dim] - 2 : 1;
             }
@@ -202,12 +200,12 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
     } else {
 
         if (end == FaceEnd::First) {
-            for (auto dim : std::views::iota(0, NDims)) {
+            for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
                 from[dim] = (dim == axis) ? 0 : 1;
                 to[dim] = (dim == axis) ? 1 : _exterior_size[dim] - 1;
             }
         } else {
-            for (auto dim : std::views::iota(0, NDims)) {
+            for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
                 to[dim] = (dim == axis) ? _exterior_size[dim]
                                         : _exterior_size[dim] - 1;
                 from[dim] = (dim == axis) ? _exterior_size[dim] - 1 : 1;
@@ -218,7 +216,7 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
 }
 
 auto DistributedStructuredGrid::set_local_boundaries(
-    std::span<const AxisBoundary, NDims> axis_boundaries) -> void {
+    const std::array<AxisBoundary, NDims> &axis_boundaries) -> void {
     _neumann_boundary_count = 0;
 
     auto apply_boundary{[&](int axis, FaceEnd end) {
@@ -239,7 +237,7 @@ auto DistributedStructuredGrid::set_local_boundaries(
         }
     }};
 
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         if (_cart_neighbors[dim].first == MPI_PROC_NULL)
             apply_boundary(dim, FaceEnd::First);
         if (_cart_neighbors[dim].second == MPI_PROC_NULL)
@@ -248,17 +246,17 @@ auto DistributedStructuredGrid::set_local_boundaries(
 }
 
 DistributedStructuredGrid::DistributedStructuredGrid(
-    std::span<const int, NDims> size, BoundaryConditions boundary_specification,
+    const std::array<int, NDims> &size, BoundaryConditions boundary_specification,
     double cell_size, double default_value)
     : _cell_size(cell_size) {
     MPI_Comm_rank(MPI_COMM_WORLD, &_world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &_world_size);
-    std::ranges::copy(size, _global_size.begin());
+    std::copy(size.begin(), size.end(), _global_size.begin());
     SPDLOG_DEBUG("Process {}/{} (rank {})", _world_rank + 1, _world_size,
                  _world_rank);
 
     std::array<int, NDims> periods{};
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         periods[dim] =
             std::get_if<PeriodicBoundary>(&boundary_specification[dim]) !=
             nullptr;
@@ -266,7 +264,7 @@ DistributedStructuredGrid::DistributedStructuredGrid(
     init_topology(periods);
 
     std::array<std::ptrdiff_t, NDims> extensions;
-    for (auto dim : std::views::iota(0, NDims)) {
+    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         extensions[dim] = _exterior_size[dim];
     }
     auto extents{std::apply(

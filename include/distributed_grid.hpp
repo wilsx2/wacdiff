@@ -2,7 +2,6 @@
 
 #include "storage.hpp"
 #include <cstdint>
-#include <span>
 
 #include "boundary.hpp"
 #include "h5raii.hpp"
@@ -10,26 +9,25 @@
 #include <H5Ppublic.h>
 #include <algorithm>
 #include <array>
-#include <concepts>
 #include <cstddef>
 #include <cstdlib>
 #include <hdf5.h>
 #include <mpi.h>
 #include <multi/array.hpp>
-#include <ranges>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 class DistributedStructuredGrid {
 public:
     static constexpr std::ptrdiff_t NDims = 3;
 
     using AxisBoundary = std::variant<AxisFaces, PeriodicBoundary>;
-    using BoundaryConditions = std::span<const AxisBoundary, NDims>;
+    using BoundaryConditions = const std::array<AxisBoundary, NDims> &;
     using Subarray = decltype(std::declval<boost::multi::array<double, NDims> &>()(
         boost::multi::index_range{}, boost::multi::index_range{}));
 
@@ -68,7 +66,7 @@ private:
     bool _requests_in_flight;
 
     // Methods
-    auto init_topology(std::span<int, NDims> periods) -> void;
+    auto init_topology(std::array<int, NDims> &periods) -> void;
     auto init_transfer_types() -> void;
     auto deinit_transfer_types() -> void;
     auto init_requests() -> void;
@@ -78,8 +76,8 @@ private:
                          std::index_sequence<I...>) -> Subarray;
     auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
     auto inner_subarray() -> Subarray;
-    auto set_local_boundaries(std::span<const AxisBoundary, NDims> axis_boundaries)
-        -> void;
+    auto set_local_boundaries(
+        const std::array<AxisBoundary, NDims> &axis_boundaries) -> void;
 
 public:
     DistributedStructuredGrid(const DistributedStructuredGrid &) = delete;
@@ -87,7 +85,7 @@ public:
     DistributedStructuredGrid(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid &operator=(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid(
-        std::span<const int, NDims> size,
+        const std::array<int, NDims> &size,
         BoundaryConditions boundary_specification,
         double block_size = 1, double default_value = 0);
     ~DistributedStructuredGrid();
@@ -96,7 +94,8 @@ public:
     auto requests_in_flight() -> bool {
         return _requests_in_flight;
     }
-    auto inner_coordinates() const {
+    auto inner_coordinates() const
+        -> std::vector<std::array<std::ptrdiff_t, NDims>> {
         std::array<std::ptrdiff_t, NDims> sizes{};
         std::size_t total{1};
         for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
@@ -104,25 +103,24 @@ public:
             total *= static_cast<std::size_t>(sizes[dim]);
         }
 
-        auto decode = [sizes](std::size_t linear) {
-            std::array<std::ptrdiff_t, NDims> coordinate{};
+        std::vector<std::array<std::ptrdiff_t, NDims>> coordinates(total);
+        for (std::size_t linear = 0; linear < total; ++linear) {
             std::size_t remaining{linear};
             for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-                coordinate[dim] =
+                coordinates[linear][dim] =
                     static_cast<std::ptrdiff_t>(
                         remaining % static_cast<std::size_t>(sizes[dim])) +
                     1;
                 remaining /= static_cast<std::size_t>(sizes[dim]);
             }
-            return coordinate;
-        };
-        return std::views::iota(std::size_t{0}, total) |
-               std::views::transform(decode);
+        }
+        return coordinates;
     }
     /// Inner cells whose stencil does not reach into the halo. This is the
     /// inner region shrunk by one on every side (indices 2 .. local_size-1),
     /// and it is empty when any local dimension is smaller than 3.
-    auto interior_coordinates() const {
+    auto interior_coordinates() const
+        -> std::vector<std::array<std::ptrdiff_t, NDims>> {
         std::array<std::ptrdiff_t, NDims> sizes{};
         std::size_t total{1};
         for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
@@ -131,22 +129,23 @@ public:
             total *= static_cast<std::size_t>(sizes[dim]);
         }
 
-        auto decode = [sizes](std::size_t linear) {
-            std::array<std::ptrdiff_t, NDims> coordinate{};
+        std::vector<std::array<std::ptrdiff_t, NDims>> coordinates(total);
+        for (std::size_t linear = 0; linear < total; ++linear) {
             std::size_t remaining{linear};
             for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-                coordinate[dim] =
+                coordinates[linear][dim] =
                     static_cast<std::ptrdiff_t>(
                         remaining % static_cast<std::size_t>(sizes[dim])) +
                     2;
                 remaining /= static_cast<std::size_t>(sizes[dim]);
             }
-            return coordinate;
-        };
-        return std::views::iota(std::size_t{0}, total) |
-               std::views::transform(decode);
+        }
+        return coordinates;
     }
-    auto fill(double value) { std::ranges::fill(inner_subarray().elements(), value); }
+    auto fill(double value) {
+        auto elements{inner_subarray().elements()};
+        std::fill(elements.begin(), elements.end(), value);
+    }
     auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }
     auto local_grid() const -> const boost::multi::array<double, NDims> & {
         return _mdarray;

@@ -2,13 +2,12 @@
 #include <H5Ppublic.h>
 #include <H5Tpublic.h>
 #include <hdf5.h>
-#include <concepts>
-#include <span>
+#include <array>
 #include <string>
 #include <string_view>
 #include <utility>
 
-template <std::integral I, I Null, typename Deleter>
+template <typename I, I Null, typename Deleter>
 class UniqueHandle {
 protected:
     I _handle;
@@ -63,8 +62,8 @@ struct H5Dataspace : UniqueHandle<hid_t, H5I_INVALID_HID, H5DataspaceCloser> {
     H5Dataspace(int ndims, const hsize_t *dims, const hsize_t *maxdims = nullptr)
         : UniqueHandle(H5Screate_simple(ndims, dims, maxdims)) {}
     template <int NDims>
-    H5Dataspace(std::span<const hsize_t, NDims> dims,
-                std::span<const hsize_t, NDims> maxdims = {})
+    H5Dataspace(const std::array<hsize_t, NDims> &dims,
+                const std::array<hsize_t, NDims> &maxdims = {})
         : UniqueHandle(H5Screate_simple(NDims, dims.data(), maxdims.data())) {}
 };
 struct H5Dataset : UniqueHandle<hid_t, H5I_INVALID_HID, H5DatasetCloser> {

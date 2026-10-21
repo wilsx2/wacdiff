@@ -1,4 +1,5 @@
 #include "solver.hpp"
+#include "index_for_each.hpp"
 #include "initial_conditions.hpp"
 #include "timing.hpp"
 
@@ -7,7 +8,6 @@
 #include <cassert>
 #include <cstddef>
 #include <numeric>
-#include <ranges>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -68,18 +68,18 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         auto apply_stencil{[&](const std::array<std::ptrdiff_t, NDims> &idx) {
             double neighbor_sum{0};
             static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
-            [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
-                ([&] {
+            for_each_index(
+                [&](auto D) {
                     auto first_neighbor_idx{idx};
                     auto last_neighbor_idx{idx};
 
-                    std::get<Ds>(first_neighbor_idx) -= 1;
-                    std::get<Ds>(last_neighbor_idx) += 1;
+                    std::get<decltype(D)::value>(first_neighbor_idx) -= 1;
+                    std::get<decltype(D)::value>(last_neighbor_idx) += 1;
 
                     neighbor_sum += curr.apply(first_neighbor_idx) +
                                     curr.apply(last_neighbor_idx);
-                }(), ...);
-            }(DimSeq);
+                },
+                DimSeq);
 
             auto delta{_gamma *
                       (neighbor_sum -

@@ -14,7 +14,7 @@ A parallel, distributed 3D heat diffusion simulator using the explicit Finite Di
 
 Prerequisites:
 - CMake >= 3.5
-- C++ compiler with C++26 support
+- C++ compiler with C++17 support
 - MPI implementation
 - OpenMP (Bundled with GCC/Clang)
 - Parallel HDF5

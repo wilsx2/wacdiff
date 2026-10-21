@@ -1,4 +1,5 @@
 #include "initial_conditions.hpp"
+#include "index_for_each.hpp"
 
 #include "input.hpp"
 #include <exprtk.hpp>
@@ -78,14 +79,16 @@ auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const
     for (auto &&coordinate : domain.inner_coordinates()) {
         static constexpr auto DimSeq{
             std::make_index_sequence<DistributedStructuredGrid::NDims>{}};
-        [&]<std::size_t... Ds>(std::index_sequence<Ds...>) {
-            ([&] {
-                std::get<Ds>(_impl->coordinate) =
-                    (static_cast<double>(domain.local_start()[Ds]) +
-                     static_cast<double>(std::get<Ds>(coordinate))) *
+        for_each_index(
+            [&](auto D) {
+                std::get<decltype(D)::value>(_impl->coordinate) =
+                    (static_cast<double>(
+                         domain.local_start()[decltype(D)::value]) +
+                     static_cast<double>(
+                         std::get<decltype(D)::value>(coordinate))) *
                     domain.cell_size();
-            }(), ...);
-        }(DimSeq);
+            },
+            DimSeq);
         grid.apply(coordinate) = _impl->expression.value();
     }
 }

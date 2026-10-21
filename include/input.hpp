@@ -4,8 +4,6 @@
 #include <pugixml.hpp>
 
 #include <charconv>
-#include <concepts>
-#include <ranges>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -67,22 +65,29 @@ inline auto child_pair(const pugi::xml_node &node, std::string_view child_name)
     -> std::pair<double, double> {
     auto child{required_child(node, child_name)};
     std::string_view text{child.child_value()};
-    auto tokens{text | std::views::split(' ') |
-                std::views::filter([](auto token) { return !token.empty(); })};
     double values[2]{};
-    auto token_it{tokens.begin()};
-    for (auto &value : values) {
-        if (token_it == tokens.end()) {
-            throw ConfigError{"Failed to parse <" + std::string(child_name) +
-                              "> in <" + node.name() +
-                              ">: expected two numbers, got \"" +
-                              std::string(text) + "\""};
+    std::size_t value_count{0};
+    std::string_view remaining{text};
+    while (!remaining.empty()) {
+        auto pos{remaining.find(' ')};
+        auto token{remaining.substr(0, pos)};
+        if (!token.empty()) {
+            if (value_count >= 2) {
+                throw ConfigError{"Failed to parse <" +
+                                  std::string(child_name) + "> in <" +
+                                  node.name() +
+                                  ">: expected two numbers, got \"" +
+                                  std::string(text) + "\""};
+            }
+            values[value_count++] = parse_value<double>(token);
         }
-        auto token{*token_it};
-        value = parse_value<double>(std::string_view{token.begin(), token.end()});
-        ++token_it;
+        if (pos == std::string_view::npos) {
+            remaining = {};
+        } else {
+            remaining.remove_prefix(pos + 1);
+        }
     }
-    if (token_it != tokens.end()) {
+    if (value_count != 2) {
         throw ConfigError{"Failed to parse <" + std::string(child_name) +
                           "> in <" + node.name() +
                           ">: expected two numbers, got \"" +

@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace {
-auto join_transformed(const auto &range, auto &&transform) -> std::string {
+template <typename Range, typename Transform>
+auto join_transformed(const Range &range, Transform &&transform) -> std::string {
     std::string result;
     bool first{true};
     for (const auto &value : range) {
@@ -130,14 +130,18 @@ DSGArchive::DSGArchive(std::string filename, std::string label,
                        double block_size, const DSG &grid)
     : Base(filename, grid.comm(), grid.world_rank()), _label(label),
       _block_size(block_size) {
-    std::ranges::transform(grid.global_size(), _cached_global_size.begin(),
-                           [](int32_t v) { return static_cast<hsize_t>(v); });
-    std::ranges::transform(grid.local_start(), _cached_local_start.begin(),
-                           [](int32_t v) { return static_cast<hsize_t>(v); });
-    std::ranges::transform(grid.local_size(), _cached_local_size.begin(),
-                           [](int32_t v) { return static_cast<hsize_t>(v); });
-    std::ranges::transform(grid.local_size(), _cached_exterior_size.begin(),
-                           [](int32_t v) { return static_cast<hsize_t>(v + 2); });
+    std::transform(grid.global_size().begin(), grid.global_size().end(),
+                   _cached_global_size.begin(),
+                   [](int32_t v) { return static_cast<hsize_t>(v); });
+    std::transform(grid.local_start().begin(), grid.local_start().end(),
+                   _cached_local_start.begin(),
+                   [](int32_t v) { return static_cast<hsize_t>(v); });
+    std::transform(grid.local_size().begin(), grid.local_size().end(),
+                   _cached_local_size.begin(),
+                   [](int32_t v) { return static_cast<hsize_t>(v); });
+    std::transform(grid.local_size().begin(), grid.local_size().end(),
+                   _cached_exterior_size.begin(),
+                   [](int32_t v) { return static_cast<hsize_t>(v + 2); });
 
     if (grid.world_rank() == 0) {
         auto xdmf{this->_light_file.append_child("Xdmf")};

@@ -5,7 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -105,6 +105,9 @@ target_include_directories(wacdiff PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_precompile_headers(wacdiff PRIVATE src/pch.hpp)
+if(WACDIFF_PROFILING)
+    target_compile_definitions(wacdiff PRIVATE WACDIFF_PROFILING)
+endif()
 target_link_libraries(wacdiff PUBLIC
     OpenMP::OpenMP_CXX
     MPI::MPI_CXX
