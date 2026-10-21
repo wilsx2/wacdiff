@@ -28,8 +28,10 @@ public:
     }
     ~Archive() {
         if (_rank == 0) {
-            // WARN: No error checking
-            _light_file.save_file(_light_data_filename.data());
+            auto success = _light_file.save_file(_light_data_filename.data());
+            if (!success) {
+                SPDLOG_ERROR("Final light file write failed");
+            }
         }
     }
     auto append_state(const T &state) -> void;

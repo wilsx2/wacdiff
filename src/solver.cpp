@@ -145,6 +145,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
                               current_iterations * _constants.time_step);
     }
 
+    // TODO: Log timing data
+
     SPDLOG_INFO("Simulation finished: {} iterations, t = {}.",
                 current_iterations, current_iterations * _constants.time_step);
 }

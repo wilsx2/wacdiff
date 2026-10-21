@@ -1,6 +1,7 @@
 #pragma once
 #ifdef WACDIFF_PROFILING
 
+#include <pugixml.hpp>
 #include <array>
 #include <chrono>
 
@@ -24,7 +25,8 @@ class RunningTimer {
     auto& at(Phase phase){
         return _durations[static_cast<char>(phase)];
     }
-    auto reduceToRoot() -> void {
+    auto save() -> void {
+        // Reduce to root
         int root = 0;
         int rank, world_size;
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -36,6 +38,20 @@ class RunningTimer {
         }
         for (auto& val : _durations) {
             val /= world_size;
+        }
+
+        // Construct report
+        auto xml = pugi::xml_document{};
+
+        using std::to_string;
+        xml.append_child("units").set_value("ms");
+        xml.append_child("compute")       .set_value(to_string(_durations[0]));
+        xml.append_child("communication") .set_value(to_string(_durations[1]));
+        xml.append_child("io")            .set_value(to_string(_durations[2]));
+
+        auto success = xml.save_file("timing.xml");
+        if (!success) {
+            SPDLOG_ERROR("Timing report failed to save");
         }
     }
 };
