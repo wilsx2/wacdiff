@@ -5,6 +5,7 @@
 #include "initial_conditions.hpp"
 #include "input.hpp"
 #include "solver.hpp"
+#include "timing.hpp"
 
 #include <argparse/argparse.hpp>
 #include <mpi.h>
@@ -14,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <ranges>
 #include <string_view>
 
@@ -81,8 +83,25 @@ auto parse_config(const pugi::xml_node &sim)
 
 template <typename InitialConditions>
 auto solve(const pugi::xml_node &sim) -> void {
-    SpmdFdmExplicitHeatEqSolver solver{parse_config<InitialConditions>(sim)};
-    solver.run();
+    auto config{parse_config<InitialConditions>(sim)};
+
+    std::unique_ptr<SpmdFdmExplicitHeatEqSolver> solver;
+    {
+        #ifdef WACDIFF_PROFILING
+        auto timer = ScopedTimer(Phase::Computation);
+        #endif
+        solver = std::make_unique<SpmdFdmExplicitHeatEqSolver>(
+            std::move(config));
+    }
+
+    solver->run();
+
+    {
+        #ifdef WACDIFF_PROFILING
+        auto timer = ScopedTimer(Phase::Computation);
+        #endif
+        solver.reset();
+    }
 }
 
 inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
@@ -167,6 +186,10 @@ int main(int argc, char *argv[]) {
 
         auto sim{doc.child("simulation")};
         static_dispatch_solve(sim);
+
+        #ifdef WACDIFF_PROFILING
+        RunningTimer::instance().save();
+        #endif
     } catch (const std::exception &err) {
         SPDLOG_ERROR("{}", err.what());
         MPI_Finalize();

@@ -1,5 +1,6 @@
 #include "solver.hpp"
 #include "initial_conditions.hpp"
+#include "timing.hpp"
 
 #include <algorithm>
 #include <array>
@@ -65,8 +66,6 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         auto &curr{_double_grid[_grid_idx].local_grid()};
         auto &next{_double_grid[!_grid_idx].local_grid()};
 
-        _double_grid[_grid_idx].begin_halo_exchange();
-
         auto apply_stencil{[&](const std::array<std::ptrdiff_t, NDims> &idx) {
             double neighbor_sum{0};
             static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
@@ -84,68 +83,116 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             }(DimSeq);
 
             auto delta{_gamma *
-                       (neighbor_sum -
+                      (neighbor_sum -
                         static_cast<double>(NumNeighbors) * curr.apply(idx))};
             next.apply(idx) = curr.apply(idx) + delta;
             return delta * delta;
         }};
 
-        // Halo-independent interior cells.
-        double interior_norm_delta{0};
+        double interior_norm_delta{0.0};
+        double node_avg_norm_delta{0.0};
+        double global_sum_avg_norm_delta{0.0};
+        double avg_norm_delta{0.0};
+
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::Computation);
+            #endif
+
+            _double_grid[_grid_idx].begin_halo_exchange();
+
+            interior_norm_delta = 0.0;
 #pragma omp parallel for reduction(+ : interior_norm_delta)
-        for (auto idx : _double_grid[_grid_idx].interior_coordinates()) {
-            interior_norm_delta += apply_stencil(idx);
+            for (auto idx : _double_grid[_grid_idx].interior_coordinates()) {
+                interior_norm_delta += apply_stencil(idx);
+            }
         }
 
-        // Halos are valid now; finish the shell cells that read them.
-        _double_grid[_grid_idx].await_halo_exchange();
-        assert(!_double_grid[_grid_idx].requests_in_flight());
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::Communication);
+            #endif
 
-        auto shell_norm_delta{0.0};
+            // Halos are valid now; finish the shell cells that read them.
+            _double_grid[_grid_idx].await_halo_exchange();
+            assert(!_double_grid[_grid_idx].requests_in_flight());
+        }
+
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::Computation);
+            #endif
+
+            auto shell_norm_delta{0.0};
 #pragma omp parallel for reduction(+ : shell_norm_delta)
-        for (const auto &idx : shell_coords) {
-            shell_norm_delta += apply_stencil(idx);
+            for (const auto &idx : shell_coords) {
+                shell_norm_delta += apply_stencil(idx);
+            }
+
+            auto total_norm_delta{interior_norm_delta + shell_norm_delta};
+            const auto inner_count{
+                shell_coords.size() +
+                _double_grid[_grid_idx].interior_coordinates().size()};
+
+            node_avg_norm_delta =
+                total_norm_delta / static_cast<double>(inner_count);
+            global_sum_avg_norm_delta = 0.0;
         }
 
-        auto total_norm_delta{interior_norm_delta + shell_norm_delta};
-        const auto inner_count{
-            shell_coords.size() +
-            _double_grid[_grid_idx].interior_coordinates().size()};
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::Communication);
+            #endif
 
-        auto node_avg_norm_delta{
-            total_norm_delta / static_cast<double>(inner_count)};
-        auto global_sum_avg_norm_delta{0.0};
-        MPI_Allreduce(&node_avg_norm_delta, &global_sum_avg_norm_delta, 1,
-                      MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+            MPI_Allreduce(&node_avg_norm_delta, &global_sum_avg_norm_delta, 1,
+                          MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }
 
-        auto avg_norm_delta{global_sum_avg_norm_delta /
-                            _double_grid[_grid_idx].world_size()};
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::Computation);
+            #endif
 
-        // Swap roles of current and next grids
-        _grid_idx = !_grid_idx;
-        ++current_iterations;
+            avg_norm_delta = global_sum_avg_norm_delta /
+                             _double_grid[_grid_idx].world_size();
 
-        // Check convergence
-        converged = avg_norm_delta < _constants.epsilon ||
-                    current_iterations >= _constants.max_iterations;
+            // Swap roles of current and next grids
+            _grid_idx = !_grid_idx;
+            ++current_iterations;
+
+            // Check convergence
+            converged = avg_norm_delta < _constants.epsilon ||
+                        current_iterations >= _constants.max_iterations;
+        }
+
         SPDLOG_TRACE("current_iterations={}, avg_norm_delta={}",
                      current_iterations, avg_norm_delta);
 
         // Save checkpoint
+        {
+            #ifdef WACDIFF_PROFILING
+            auto timer = ScopedTimer(Phase::IO);
+            #endif
+
+            if (_constants.storage_interval != 0 &&
+                current_iterations % _constants.storage_interval == 0) {
+                _archive.append_state(_double_grid[_grid_idx], current_iterations,
+                                      current_iterations * _constants.time_step);
+            }
+        }
+    }
+    {
+        #ifdef WACDIFF_PROFILING
+        auto timer = ScopedTimer(Phase::IO);
+        #endif
+
+        // Make sure the final state is stored
         if (_constants.storage_interval != 0 &&
-            current_iterations % _constants.storage_interval == 0) {
+            current_iterations % _constants.storage_interval != 0) {
             _archive.append_state(_double_grid[_grid_idx], current_iterations,
                                   current_iterations * _constants.time_step);
         }
     }
-    // Make sure the final state is stored
-    if (_constants.storage_interval != 0 &&
-        current_iterations % _constants.storage_interval != 0) {
-        _archive.append_state(_double_grid[_grid_idx], current_iterations,
-                              current_iterations * _constants.time_step);
-    }
-
-    // TODO: Log timing data
 
     SPDLOG_INFO("Simulation finished: {} iterations, t = {}.",
                 current_iterations, current_iterations * _constants.time_step);
