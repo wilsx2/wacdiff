@@ -302,7 +302,7 @@ auto DistributedStructuredGrid::await_halo_exchange() -> void {
                               get_face(face.axis, face.end, FaceKind::Interior)}
                 .apply();
         }
-        std::array<MPI_Status, _requests.size()> statuses;
+        std::array<MPI_Status, NDims * 4> statuses;
         MPI_Waitall(_requests.size(), _requests.data(), statuses.data());
         _requests_in_flight = false;
     }
