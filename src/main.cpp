@@ -137,19 +137,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    auto input_file{std::filesystem::absolute(
-                        program.get<std::string>("input"))
-                        .string()};
-    auto output_path{program.get<std::string>("--output")};
-    try {
-        std::filesystem::create_directory(output_path);
-        std::filesystem::current_path(output_path);
-    } catch (const std::exception &err) {
-        std::cerr << "Directory '" << output_path
-                  << "' failed to create or enter\n";
-        return EXIT_FAILURE;
-    }
-
     spdlog::set_level([&]() {
         auto level{program.get<std::string>("--log")};
         if (level == "trace") {
@@ -168,9 +155,37 @@ int main(int argc, char *argv[]) {
         return spdlog::level::off;
     }());
 
+
+    auto input_file{std::filesystem::absolute(
+                        program.get<std::string>("input"))
+                        .string()};
+    auto output_path{program.get<std::string>("--output")};
+
     SPDLOG_TRACE("Initializing MPI...");
     MPI_Init(&argc, &argv);
     SPDLOG_TRACE("Initialized MPI.");
+
+    int rank{};
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    if (rank == 0) {
+        try {
+            std::filesystem::create_directories(output_path);
+        } catch (const std::exception &err) {
+            std::cerr << "Directory '" << output_path
+                      << "' failed to create \n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    try {
+        std::filesystem::current_path(output_path);
+    } catch (const std::exception &err) {
+        std::cerr << "Directory '" << output_path
+                  << "' failed to enter \n";
+        return EXIT_FAILURE;
+    }
 
     try {
         SPDLOG_TRACE("Parsing XML input file " + input_file + "...");
