@@ -23,10 +23,14 @@ SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
                    DistributedStructuredGrid{_constants.domain_size,
                                              _constants.boundary_conditions,
                                              _constants.space_step}},
-      _grid_idx{false}, _archive("sim", "temperature", _constants.space_step,
-                                 _double_grid[_grid_idx]) {
+      _grid_idx{false} {
     std::visit(InitialConditionVisitor{_double_grid[_grid_idx]},
                _constants.initial_conditions);
+
+    if (_constants.storage_interval != 0) {
+        _archive.emplace("sim", "temperature", _constants.space_step,
+                         _double_grid[_grid_idx]);
+    }
 }
 
 auto SpmdFdmExplicitHeatEqSolver::run() -> void {
@@ -56,8 +60,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     }
 
     if (_constants.storage_interval != 0) {
-        _archive.append_state(_double_grid[_grid_idx], current_iterations,
-                              current_iterations * _constants.time_step);
+        _archive->append_state(_double_grid[_grid_idx], current_iterations,
+                               current_iterations * _constants.time_step);
     }
 
     const auto interior_coords{_double_grid[0].interior_coordinates()};
@@ -175,8 +179,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             if (_constants.storage_interval != 0 &&
                 current_iterations % _constants.storage_interval == 0) {
-                _archive.append_state(_double_grid[_grid_idx], current_iterations,
-                                      current_iterations * _constants.time_step);
+                _archive->append_state(_double_grid[_grid_idx], current_iterations,
+                                       current_iterations * _constants.time_step);
             }
         }
     }
@@ -188,8 +192,8 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
         // Make sure the final state is stored
         if (_constants.storage_interval != 0 &&
             current_iterations % _constants.storage_interval != 0) {
-            _archive.append_state(_double_grid[_grid_idx], current_iterations,
-                                  current_iterations * _constants.time_step);
+            _archive->append_state(_double_grid[_grid_idx], current_iterations,
+                                   current_iterations * _constants.time_step);
         }
     }
 

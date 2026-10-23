@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include <array>
+#include <optional>
 
 class SpmdFdmExplicitHeatEqSolver {
 public:
@@ -33,7 +34,7 @@ private:
     std::array<DistributedStructuredGrid, 2> _double_grid;
     bool _grid_idx;
 
-    DSGArchive _archive;
+    std::optional<DSGArchive> _archive;
 
 public:
     SpmdFdmExplicitHeatEqSolver() = delete;
