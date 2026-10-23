@@ -101,15 +101,17 @@ def generate_batch_script(run: Run) -> str:
 #SBATCH --job-name={name}
 #SBATCH --output=slurm-{name}-%j.out
 #SBATCH --error=slurm-{name}-%j.err
-#SBATCH --time=
+#SBATCH --time=00:30:00
 #SBATCH --ntasks={run.nodes}
 #SBATCH --cpus-per-task={run.cpus_per_node}
+#SBATCH --partition=scavenger
 
+module purge
 module load gcc/11.3.0
-module load openmpi/gcc/11.3.0/zen2/
+module load openmpi/gcc/11.3.0/zen2/4.1.5
 module load hdf5/gcc/11.3.0/openmpi/4.1.5/zen2/
 
-srun build/wacdiff inputs/{name}.xml -o outputs/{name}
+mpirun build/wacdiff inputs/{name}.xml -o outputs/{name}-${'{SLURM_JOB_ID}'} --log error
 """
     return script_contents
 
