@@ -24,6 +24,7 @@ SCALE = 0.1
 STRONG_SIZE = 512             # strong-scaling global grid (per dimension)
 WEAK_BASE_SIZE = 256          # weak-scaling base grid (per dimension)
 IO_FREQUENCY = 32             # checkpoint interval for the I/O scaling sweep
+REPETITIONS = 3               # back-to-back runs of each config per allocation
 
 @dataclass
 class Run:
@@ -101,9 +102,11 @@ def generate_batch_script(run: Run, sweep: str) -> str:
 #SBATCH --job-name={name}
 #SBATCH --output=slurm-{name}-%j.out
 #SBATCH --error=slurm-{name}-%j.err
-#SBATCH --time=00:30:00
-#SBATCH --ntasks={run.nodes}
+#SBATCH --time=01:30:00
+#SBATCH --nodes={run.nodes}
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={run.cpus_per_node}
+#SBATCH --exclusive
 #SBATCH --partition=scavenger
 
 module purge
@@ -111,7 +114,16 @@ module load gcc/11.3.0
 module load openmpi/gcc/11.3.0/zen2/4.1.5
 module load hdf5/gcc/11.3.0/openmpi/4.1.5/zen2/
 
-mpirun build/wacdiff inputs/{sweep}/{name}.xml -o outputs/{sweep}/{name}-${{SLURM_JOB_ID}} --log error
+export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
+export OMP_PLACES=cores
+export OMP_PROC_BIND=close
+export OMP_DISPLAY_AFFINITY=true
+
+for rep in $(seq 1 {REPETITIONS}); do
+    mpirun --map-by ppr:1:node:PE=${{SLURM_CPUS_PER_TASK}} --bind-to core --report-bindings \\
+        build/wacdiff inputs/{sweep}/{name}.xml \\
+        -o outputs/{sweep}/{name}-${{SLURM_JOB_ID}}-r${{rep}} --log error
+done
 """
     return script_contents
 
