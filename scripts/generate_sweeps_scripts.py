@@ -95,7 +95,7 @@ def generate_input(run: Run) -> str:
 </simulation>"""
     return input_string
 
-def generate_batch_script(run: Run) -> str:
+def generate_batch_script(run: Run, sweep: str) -> str:
     name = generate_name(run)
     script_contents = f"""#!/bin/bash
 #SBATCH --job-name={name}
@@ -111,7 +111,7 @@ module load gcc/11.3.0
 module load openmpi/gcc/11.3.0/zen2/4.1.5
 module load hdf5/gcc/11.3.0/openmpi/4.1.5/zen2/
 
-mpirun build/wacdiff inputs/{name}.xml -o outputs/{name}-${'{SLURM_JOB_ID}'} --log error
+mpirun build/wacdiff inputs/{sweep}/{name}.xml -o outputs/{sweep}/{name}-${{SLURM_JOB_ID}} --log error
 """
     return script_contents
 
@@ -124,19 +124,18 @@ def write_sweep_files(sweeps: Sweeps):
         "io_scaling"
     ]
 
-    os.makedirs(f"inputs", exist_ok=True)
-    os.makedirs(f"outputs", exist_ok=True)
-    os.makedirs(f"sbatch", exist_ok=True)
     for attr in sweep_attrs:
+        os.makedirs(f"inputs/{attr}", exist_ok=True)
+        os.makedirs(f"outputs/{attr}", exist_ok=True)
+        os.makedirs(f"sbatch/{attr}", exist_ok=True)
+
         runs = getattr(sweeps, attr)
         for run in runs:
             name = generate_name(run)
-            with open(f"inputs/{name}.xml", "w", encoding="utf-8") as file:
-                content = generate_input(run)
-                file.write(content)
-            with open(f"sbatch/{name}.sh", "w", encoding="utf-8") as file:
-                content = generate_batch_script(run)
-                file.write(content)
+            with open(f"inputs/{attr}/{name}.xml", "w", encoding="utf-8") as file:
+                file.write(generate_input(run))
+            with open(f"sbatch/{attr}/{name}.sh", "w", encoding="utf-8") as file:
+                file.write(generate_batch_script(run, attr))
 
 def main():
     sweeps = generate_sweeps()
