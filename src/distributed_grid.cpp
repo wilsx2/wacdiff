@@ -263,6 +263,11 @@ DistributedStructuredGrid::DistributedStructuredGrid(
     }
     init_topology(periods);
 
+    _strides[NDims - 1] = 1;
+    for (std::ptrdiff_t dim = NDims - 2; dim >= 0; --dim) {
+        _strides[dim] = _strides[dim + 1] * _exterior_size[dim + 1];
+    }
+
     std::array<std::ptrdiff_t, NDims> extensions;
     for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
         extensions[dim] = _exterior_size[dim];

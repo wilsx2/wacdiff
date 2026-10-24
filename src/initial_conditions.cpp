@@ -2,6 +2,8 @@
 #include "index_for_each.hpp"
 
 #include "input.hpp"
+#include <array>
+#include <cstddef>
 #include <exprtk.hpp>
 #include <memory>
 #include <stdexcept>
@@ -75,10 +77,25 @@ ExpressionInitialConditions &ExpressionInitialConditions::operator=(
 ExpressionInitialConditions::~ExpressionInitialConditions() = default;
 
 auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const -> void {
+    constexpr auto NDims{DistributedStructuredGrid::NDims};
     auto &grid{domain.local_grid()};
-    for (auto &&coordinate : domain.inner_coordinates()) {
-        static constexpr auto DimSeq{
-            std::make_index_sequence<DistributedStructuredGrid::NDims>{}};
+    const auto &local_size{domain.local_size()};
+    const auto inner_size{domain.inner_size()};
+
+    for (std::size_t linear = 0; linear < inner_size; ++linear) {
+        std::array<std::ptrdiff_t, NDims> coordinate{};
+        std::ptrdiff_t offset{0};
+        std::size_t remaining{linear};
+        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
+            coordinate[dim] =
+                static_cast<std::ptrdiff_t>(
+                    remaining % static_cast<std::size_t>(local_size[dim])) +
+                1;
+            remaining /= static_cast<std::size_t>(local_size[dim]);
+            offset += coordinate[dim] * domain.stride(dim);
+        }
+
+        static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
         for_each_index(
             [&](auto D) {
                 std::get<decltype(D)::value>(_impl->coordinate) =
@@ -89,6 +106,6 @@ auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const
                     domain.cell_size();
             },
             DimSeq);
-        grid.apply(coordinate) = _impl->expression.value();
+        grid.base()[offset] = _impl->expression.value();
     }
 }

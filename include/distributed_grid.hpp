@@ -20,7 +20,6 @@
 #include <tuple>
 #include <utility>
 #include <variant>
-#include <vector>
 
 class DistributedStructuredGrid {
 public:
@@ -37,6 +36,7 @@ private:
     std::array<int32_t, NDims> _local_size;
     std::array<int32_t, NDims> _local_start;
     std::array<int32_t, NDims> _exterior_size;
+    std::array<std::ptrdiff_t, NDims> _strides;
     boost::multi::array<double, NDims> _mdarray;
 
     // Metadata
@@ -94,53 +94,117 @@ public:
     auto requests_in_flight() -> bool {
         return _requests_in_flight;
     }
-    auto inner_coordinates() const
-        -> std::vector<std::array<std::ptrdiff_t, NDims>> {
-        std::array<std::ptrdiff_t, NDims> sizes{};
+    auto inner_size() const -> std::size_t {
         std::size_t total{1};
         for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-            sizes[dim] = static_cast<std::ptrdiff_t>(_exterior_size[dim]) - 2;
-            total *= static_cast<std::size_t>(sizes[dim]);
+            total *= static_cast<std::size_t>(_local_size[dim]);
         }
-
-        std::vector<std::array<std::ptrdiff_t, NDims>> coordinates(total);
-        for (std::size_t linear = 0; linear < total; ++linear) {
-            std::size_t remaining{linear};
-            for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-                coordinates[linear][dim] =
-                    static_cast<std::ptrdiff_t>(
-                        remaining % static_cast<std::size_t>(sizes[dim])) +
-                    1;
-                remaining /= static_cast<std::size_t>(sizes[dim]);
-            }
-        }
-        return coordinates;
+        return total;
     }
-    /// Inner cells whose stencil does not reach into the halo. This is the
-    /// inner region shrunk by one on every side (indices 2 .. local_size-1),
-    /// and it is empty when any local dimension is smaller than 3.
-    auto interior_coordinates() const
-        -> std::vector<std::array<std::ptrdiff_t, NDims>> {
-        std::array<std::ptrdiff_t, NDims> sizes{};
+    /// Number of interior cells (indices 2 .. local_size-1). This is zero
+    /// when any local dimension is smaller than 3.
+    auto interior_size() const -> std::size_t {
         std::size_t total{1};
         for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-            sizes[dim] = std::max<std::ptrdiff_t>(
-                0, static_cast<std::ptrdiff_t>(_exterior_size[dim]) - 4);
-            total *= static_cast<std::size_t>(sizes[dim]);
+            total *= static_cast<std::size_t>(
+                std::max(0, _local_size[dim] - 2));
+        }
+        return total;
+    }
+    /// Stride, in elements, along one logical dimension of the local grid.
+    auto stride(std::ptrdiff_t dim) const -> std::ptrdiff_t {
+        return _strides[dim];
+    }
+    /// Maps a flat index in [0, inner_size()) to an offset into
+    /// local_grid().base() for the corresponding inner cell.
+    auto inner_offset(std::size_t linear) const -> std::ptrdiff_t {
+        std::ptrdiff_t offset{0};
+        std::size_t remaining{linear};
+        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
+            const auto coord{remaining %
+                             static_cast<std::size_t>(_local_size[dim])};
+            remaining /= static_cast<std::size_t>(_local_size[dim]);
+            offset += static_cast<std::ptrdiff_t>(coord + 1) * _strides[dim];
+        }
+        return offset;
+    }
+    /// Maps a flat index in [0, interior_size()) to an offset into
+    /// local_grid().base() for the corresponding interior cell.
+    auto interior_offset(std::size_t linear) const -> std::ptrdiff_t {
+        std::ptrdiff_t offset{0};
+        std::size_t remaining{linear};
+        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
+            const auto extent{static_cast<std::size_t>(
+                std::max(0, _local_size[dim] - 2))};
+            if (extent == 0) {
+                return 0;
+            }
+            const auto coord{remaining % extent};
+            remaining /= extent;
+            offset += static_cast<std::ptrdiff_t>(coord + 2) * _strides[dim];
+        }
+        return offset;
+    }
+    /// Number of shell cells (inner cells adjacent to the halo).
+    auto shell_size() const -> std::size_t {
+        return inner_size() - interior_size();
+    }
+    /// Maps a flat index in [0, shell_size()) to an offset into
+    /// local_grid().base() for the corresponding shell cell.
+    auto shell_offset(std::size_t linear) const -> std::ptrdiff_t {
+        const auto l0{static_cast<std::size_t>(_local_size[0])};
+        const auto l1{static_cast<std::size_t>(_local_size[1])};
+        const auto l2{static_cast<std::size_t>(_local_size[2])};
+        if (l0 < 3 || l1 < 3 || l2 < 3) {
+            return inner_offset(linear);
         }
 
-        std::vector<std::array<std::ptrdiff_t, NDims>> coordinates(total);
-        for (std::size_t linear = 0; linear < total; ++linear) {
-            std::size_t remaining{linear};
-            for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-                coordinates[linear][dim] =
-                    static_cast<std::ptrdiff_t>(
-                        remaining % static_cast<std::size_t>(sizes[dim])) +
-                    2;
-                remaining /= static_cast<std::size_t>(sizes[dim]);
-            }
+        auto offset_of{[&](std::size_t i, std::size_t j, std::size_t k) {
+            return static_cast<std::ptrdiff_t>(i) * _strides[0] +
+                   static_cast<std::ptrdiff_t>(j) * _strides[1] +
+                   static_cast<std::ptrdiff_t>(k) * _strides[2];
+        }};
+
+        const auto b0{l1 * l2};
+        const auto b1{b0};
+        const auto b2{(l0 - 2) * l2};
+        const auto b3{b2};
+        const auto b4{(l0 - 2) * (l1 - 2)};
+
+        auto remaining{linear};
+        if (remaining < b0) {
+            const auto j{remaining / l2 + 1};
+            const auto k{remaining % l2 + 1};
+            return offset_of(1, j, k);
         }
-        return coordinates;
+        remaining -= b0;
+        if (remaining < b1) {
+            const auto j{remaining / l2 + 1};
+            const auto k{remaining % l2 + 1};
+            return offset_of(l0, j, k);
+        }
+        remaining -= b1;
+        if (remaining < b2) {
+            const auto i{remaining / l2 + 2};
+            const auto k{remaining % l2 + 1};
+            return offset_of(i, 1, k);
+        }
+        remaining -= b2;
+        if (remaining < b3) {
+            const auto i{remaining / l2 + 2};
+            const auto k{remaining % l2 + 1};
+            return offset_of(i, l1, k);
+        }
+        remaining -= b3;
+        if (remaining < b4) {
+            const auto i{remaining / (l1 - 2) + 2};
+            const auto j{remaining % (l1 - 2) + 2};
+            return offset_of(i, j, 1);
+        }
+        remaining -= b4;
+        const auto i{remaining / (l1 - 2) + 2};
+        const auto j{remaining % (l1 - 2) + 2};
+        return offset_of(i, j, l2);
     }
     auto fill(double value) {
         auto elements{inner_subarray().elements()};

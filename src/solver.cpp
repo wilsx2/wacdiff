@@ -10,7 +10,6 @@
 #include <numeric>
 #include <utility>
 #include <variant>
-#include <vector>
 
 SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
     : _constants{std::move(config)},
@@ -41,57 +40,42 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     constexpr auto NDims{DistributedStructuredGrid::NDims};
     constexpr auto NumNeighbors{NDims * 2};
 
-    // Compute shell coordinates (adjacent to and depending on halo)
-    std::vector<std::array<std::ptrdiff_t, NDims>> shell_coords;
-    {
-        const auto &local_size{_double_grid[0].local_size()};
-        for (auto idx : _double_grid[0].inner_coordinates()) {
-            auto on_shell{false};
-            for (auto dim = 0; dim < NDims; ++dim) {
-                if (idx[dim] == 1 || idx[dim] == local_size[dim]) {
-                    on_shell = true;
-                    break;
-                }
-            }
-            if (on_shell) {
-                shell_coords.push_back(idx);
-            }
-        }
-    }
+    const auto inner_size{_double_grid[0].inner_size()};
+    const auto interior_size{_double_grid[0].interior_size()};
+    const auto shell_size{_double_grid[0].shell_size()};
 
     if (_constants.storage_interval != 0) {
         _archive->append_state(_double_grid[_grid_idx], current_iterations,
                                current_iterations * _constants.time_step);
     }
 
-    const auto interior_coords{_double_grid[0].interior_coordinates()};
-    const auto inner_count{shell_coords.size() + interior_coords.size()};
-
     // Perform simulation
     while (!converged) {
         auto &curr{_double_grid[_grid_idx].local_grid()};
         auto &next{_double_grid[!_grid_idx].local_grid()};
+        auto *curr_data{curr.base()};
+        auto *next_data{next.base()};
+        const std::array<std::ptrdiff_t, NDims> strides{
+            _double_grid[_grid_idx].stride(0),
+            _double_grid[_grid_idx].stride(1),
+            _double_grid[_grid_idx].stride(2)};
 
-        auto apply_stencil{[&](const std::array<std::ptrdiff_t, NDims> &idx) {
+        auto apply_stencil{[&, strides](std::ptrdiff_t center) {
             double neighbor_sum{0};
             static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
             for_each_index(
                 [&](auto D) {
-                    auto first_neighbor_idx{idx};
-                    auto last_neighbor_idx{idx};
-
-                    std::get<decltype(D)::value>(first_neighbor_idx) -= 1;
-                    std::get<decltype(D)::value>(last_neighbor_idx) += 1;
-
-                    neighbor_sum += curr.apply(first_neighbor_idx) +
-                                    curr.apply(last_neighbor_idx);
+                    constexpr auto dim{decltype(D)::value};
+                    const auto stride{strides[dim]};
+                    neighbor_sum += curr_data[center - stride] +
+                                    curr_data[center + stride];
                 },
                 DimSeq);
 
-            auto delta{_gamma *
-                      (neighbor_sum -
-                        static_cast<double>(NumNeighbors) * curr.apply(idx))};
-            next.apply(idx) = curr.apply(idx) + delta;
+            const auto delta{
+                _gamma * (neighbor_sum - static_cast<double>(NumNeighbors) *
+                                             curr_data[center])};
+            next_data[center] = curr_data[center] + delta;
             return delta * delta;
         }};
 
@@ -109,8 +93,9 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             interior_norm_delta = 0.0;
 #pragma omp parallel for reduction(+ : interior_norm_delta)
-            for (auto idx : interior_coords) {
-                interior_norm_delta += apply_stencil(idx);
+            for (std::size_t linear = 0; linear < interior_size; ++linear) {
+                interior_norm_delta += apply_stencil(
+                    _double_grid[_grid_idx].interior_offset(linear));
             }
         }
 
@@ -131,14 +116,15 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             auto shell_norm_delta{0.0};
 #pragma omp parallel for reduction(+ : shell_norm_delta)
-            for (const auto &idx : shell_coords) {
-                shell_norm_delta += apply_stencil(idx);
+            for (std::size_t linear = 0; linear < shell_size; ++linear) {
+                shell_norm_delta += apply_stencil(
+                    _double_grid[_grid_idx].shell_offset(linear));
             }
 
             auto total_norm_delta{interior_norm_delta + shell_norm_delta};
 
             node_avg_norm_delta =
-                total_norm_delta / static_cast<double>(inner_count);
+                total_norm_delta / static_cast<double>(inner_size);
             global_sum_avg_norm_delta = 0.0;
         }
 
