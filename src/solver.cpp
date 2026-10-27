@@ -77,7 +77,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             // Inner computation (does not depend on halo)
             #pragma omp parallel reduction(+ : total_norm_delta)
             {
-                _double_grid[_grid_idx].for_all_in_shell(apply_stencil);
+                _double_grid[_grid_idx].for_all_on_shell(apply_stencil);
             }
         }
 
@@ -96,7 +96,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             #pragma omp parallel reduction(+ : total_norm_delta)
             {
-                _double_grid[_grid_idx].for_all_on_shell(apply_stencil);
+                _double_grid[_grid_idx].for_all_in_shell(apply_stencil);
             }
 
             const auto inner_elements =

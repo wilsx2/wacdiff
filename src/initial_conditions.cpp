@@ -39,23 +39,22 @@ auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const
         }
     }
 
-    const auto &local_size = domain.local_size();
     auto &grid = domain.local_grid();
 
     auto assign = [&](auto i, auto j, auto k){
         auto tid = omp_get_thread_num();
 
         std::get<0>(coordinates[tid]) =
-            static_cast<double>(domain.local_start()[0] + i)
+            static_cast<double>(domain.local_start()[0] + i - 1)
             * domain.cell_size();
         std::get<1>(coordinates[tid]) =
-            static_cast<double>(domain.local_start()[1] + j)
+            static_cast<double>(domain.local_start()[1] + j - 1)
             * domain.cell_size();
         std::get<2>(coordinates[tid]) =
-            static_cast<double>(domain.local_start()[2] + k)
+            static_cast<double>(domain.local_start()[2] + k - 1)
             * domain.cell_size();
 
-        grid[i + 1][j + 1][k + 1] = expressions[tid].value();
+        grid[i][j][k] = expressions[tid].value();
     };
 
     #pragma omp parallel
