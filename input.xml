@@ -17,7 +17,7 @@
         </dimensions>
     </discretization>
 
-    <!-- type="constant": single value; type="expr": f(x, y, z) expression -->
+    <!-- type="expr": f(x, y, z) expression -->
     <initial_conditions type="expr">
         ((x - (64*0.1)/2)^2 + (y - (64*0.1)/2)^2 + (z - (64*0.1)/2)^2)^(1/2);
     </initial_conditions>

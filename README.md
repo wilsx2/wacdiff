@@ -77,7 +77,7 @@ Simulations are fully defined by an XML file. Example:
         </dimensions>
     </discretization>
 
-    <!-- type="constant": single value; type="expr": f(x, y, z) expression -->
+    <!-- type="expr": f(x, y, z) expression -->
     <initial_conditions type="expr">
         if (x &lt; 256/2*0.1) 0; else 100;
     </initial_conditions>
@@ -94,7 +94,6 @@ Simulations are fully defined by an XML file. Example:
 
 | Type | Description |
 |---|---|
-| `constant` | Fills the entire domain with a single numeric value |
 | `expr` | Evaluates an ExprTk expression at each cell's physical coordinates `x`, `y`, `z` |
 
 ## Output
