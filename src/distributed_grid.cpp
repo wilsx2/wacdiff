@@ -2,11 +2,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <utility>
 #include <variant>
 
@@ -214,6 +219,22 @@ DistributedStructuredGrid::DistributedStructuredGrid(
         _exterior_size[2]);
     // NOTE: Uninitialized
     _mdarray = boost::multi::array<double, NDims>(extents);
+
+    // Keep transparent huge pages from collapsing the per-thread first-touch
+    // regions into one page the kernel may then migrate across NUMA domains.
+    // boost::multi's base pointer is not necessarily page-aligned, so round
+    // down to the page boundary and cover the offset in the length.
+    const auto page_size = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    const auto base = reinterpret_cast<std::uintptr_t>(_mdarray.base());
+    const auto offset = base % page_size;
+    const auto length =
+        static_cast<std::size_t>(_mdarray.num_elements()) * sizeof(double) +
+        offset;
+    if (madvise(reinterpret_cast<void *>(base - offset), length,
+                MADV_NOHUGEPAGE) != 0) {
+        SPDLOG_DEBUG("madvise(MADV_NOHUGEPAGE) failed: {}",
+                     std::strerror(errno));
+    }
 
     init_transfer_types();
     init_requests();

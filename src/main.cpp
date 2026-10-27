@@ -8,6 +8,7 @@
 
 #include <argparse/argparse.hpp>
 #include <mpi.h>
+#include <omp.h>
 #include <spdlog/spdlog.h>
 
 #include <cstddef>
@@ -133,6 +134,17 @@ int main(int argc, char *argv[]) {
 
     int rank{};
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    // Warn once if OpenMP threads are not bound to places. The solver relies
+    // on parallel first-touch for NUMA placement, which only works while each
+    // thread stays on its core; an unbound team silently puts every page on
+    // one NUMA domain.
+    if (rank == 0 && omp_get_proc_bind() == omp_proc_bind_false) {
+        SPDLOG_WARN(
+            "OpenMP threads are not bound (OMP_PROC_BIND is unset); NUMA "
+            "first-touch placement will be unreliable. Set OMP_PROC_BIND=close "
+            "and OMP_PLACES=cores.");
+    }
 
     if (rank == 0) {
         try {
