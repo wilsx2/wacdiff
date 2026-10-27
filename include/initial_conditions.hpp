@@ -22,21 +22,12 @@ class ExpressionInitialConditions {
     friend InitialConditionVisitor;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> _impl;
-
-    auto compile() -> void;
+    std::string _text;
     auto apply(DistributedStructuredGrid &domain) const -> void;
 
 public:
-    ExpressionInitialConditions();
+    ExpressionInitialConditions() = default;
     ExpressionInitialConditions(std::string_view text);
-    ExpressionInitialConditions(const ExpressionInitialConditions &);
-    ExpressionInitialConditions(ExpressionInitialConditions &&) noexcept;
-    ExpressionInitialConditions &operator=(const ExpressionInitialConditions &);
-    ExpressionInitialConditions &
-    operator=(ExpressionInitialConditions &&) noexcept;
-    ~ExpressionInitialConditions();
 };
 
 using InitialConditionUnion =
