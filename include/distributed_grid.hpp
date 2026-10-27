@@ -143,9 +143,10 @@ public:
         // NOTE: Still requires an 'omp parallel'
         const auto &dims = _exterior_size;
 
-        #pragma omp for schedule(static) collapse(3)
+        #pragma omp for schedule(static) collapse(2)
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t j = 2; j < dims[1] - 2; j++) {
+                #pragma omp simd
                 for (std::ptrdiff_t k = 2; k < dims[2] - 2; k++) {
                     f(i, j, k);
                 }

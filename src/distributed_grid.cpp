@@ -88,8 +88,6 @@ auto DistributedStructuredGrid::init_transfer_types() -> void {
         std::pair<std::array<int, NDims>, std::array<int, NDims>>
             exterior_face_starts;
         for (std::ptrdiff_t odim = 0; odim < NDims; ++odim) {
-            // NOTE: May be improved with a disjoint fill and assignment at
-            // [dim]
             if (dim == odim) {
                 exterior_face_starts.first[odim] = 0;
                 interior_face_starts.first[odim] = 1;
@@ -98,7 +96,6 @@ auto DistributedStructuredGrid::init_transfer_types() -> void {
                 exterior_face_subsizes[odim] = 1;
                 interior_face_subsizes[odim] = 1;
             } else {
-                // NOTE: Only interior cells are exchanged, corners are excluded
                 exterior_face_starts.first[odim] = 1;
                 interior_face_starts.first[odim] = 1;
                 exterior_face_starts.second[odim] = 1;
@@ -185,7 +182,6 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
             }
         }
     } else {
-
         if (end == FaceEnd::First) {
             for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
                 from[dim] = (dim == axis) ? 0 : 1;
@@ -222,8 +218,6 @@ DistributedStructuredGrid::DistributedStructuredGrid(
 
     // Keep transparent huge pages from collapsing the per-thread first-touch
     // regions into one page the kernel may then migrate across NUMA domains.
-    // boost::multi's base pointer is not necessarily page-aligned, so round
-    // down to the page boundary and cover the offset in the length.
     const auto page_size = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
     const auto base = reinterpret_cast<std::uintptr_t>(_mdarray.base());
     const auto offset = base % page_size;
