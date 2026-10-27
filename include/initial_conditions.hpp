@@ -7,17 +7,6 @@
 
 class InitialConditionVisitor;
 
-class ConstantInitialConditions {
-    friend InitialConditionVisitor;
-
-private:
-    double _value;
-
-public:
-    ConstantInitialConditions() = default;
-    ConstantInitialConditions(std::string_view text);
-};
-
 class ExpressionInitialConditions {
     friend InitialConditionVisitor;
 
@@ -30,8 +19,7 @@ public:
     ExpressionInitialConditions(std::string_view text);
 };
 
-using InitialConditionUnion =
-    std::variant<ConstantInitialConditions, ExpressionInitialConditions>;
+using InitialConditionUnion = std::variant<ExpressionInitialConditions>;
 
 class InitialConditionVisitor {
 private:
@@ -40,9 +28,6 @@ private:
 public:
     InitialConditionVisitor(DistributedStructuredGrid &domain)
         : _domain(domain) {}
-    void operator()(const ConstantInitialConditions &ic) {
-        _domain.fill(ic._value);
-    }
     void operator()(const ExpressionInitialConditions &ic) {
         ic.apply(_domain);
     }

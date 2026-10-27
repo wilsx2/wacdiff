@@ -198,7 +198,7 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
 }
 
 DistributedStructuredGrid::DistributedStructuredGrid(
-    const std::array<int, NDims> &size, double cell_size, double default_value)
+    const std::array<int, NDims> &size, double cell_size)
     : _cell_size(cell_size) {
     MPI_Comm_rank(MPI_COMM_WORLD, &_world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &_world_size);
@@ -212,7 +212,8 @@ DistributedStructuredGrid::DistributedStructuredGrid(
         _exterior_size[0],
         _exterior_size[1],
         _exterior_size[2]);
-    _mdarray = boost::multi::array<double, NDims>(extents, default_value); // WARN: NUMA!
+    // NOTE: Uninitialized
+    _mdarray = boost::multi::array<double, NDims>(extents);
 
     init_transfer_types();
     init_requests();

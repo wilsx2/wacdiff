@@ -43,6 +43,11 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
     // Perform simulation
     while (!converged) {
+        auto total_norm_delta = 0.0;
+        auto node_avg_norm_delta = 0.0;
+        auto global_sum_avg_norm_delta = 0.0;
+        auto avg_norm_delta = 0.0;
+
         auto &curr = _double_grid[_grid_idx].local_grid();
         auto &next = _double_grid[!_grid_idx].local_grid();
         const auto &dims = _double_grid[_grid_idx].exterior_size();
@@ -55,14 +60,10 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             const auto delta =
                 _gamma * (neighbor_sum - NumNeighbors * curr[i][j][k]);
 
+            // Side Effects
             next[i][j][k] = curr[i][j][k] + delta;
-            return delta * delta;
+            total_norm_delta += delta * delta;
         };
-
-        auto total_norm_delta = 0.0;
-        auto node_avg_norm_delta = 0.0;
-        auto global_sum_avg_norm_delta = 0.0;
-        auto avg_norm_delta = 0.0;
 
         {
             #ifdef WACDIFF_PROFILING
@@ -74,13 +75,9 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             total_norm_delta = 0.0;
             // TODO: vectorize
             // Inner computation (does not depend on halo)
-            #pragma omp parallel for schedule(static) collapse(3) reduction(+ : total_norm_delta)
-            for (int i = 2; i < dims[0] - 2; i++) {
-                for (int j = 2; j < dims[1] - 2; j++) {
-                    for (int k = 2; k < dims[2] - 2; k++) {
-                        total_norm_delta += apply_stencil(i, j, k);
-                    }
-                }
+            #pragma omp parallel reduction(+ : total_norm_delta)
+            {
+                _double_grid[_grid_idx].for_all_in_shell(apply_stencil);
             }
         }
 
@@ -97,36 +94,16 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             auto timer = ScopedTimer(Phase::Computation);
             #endif
 
-            // Shell computation (disjoint face/edge decomposition)
-            // x-faces: full y-z range, including y/z boundaries
-            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
-            for (int j = 1; j < dims[1] - 1; j++) {
-                for (int k = 1; k < dims[2] - 1; k++) {
-                    total_norm_delta += apply_stencil(1, j, k);
-                    total_norm_delta += apply_stencil(dims[0] - 2, j, k);
-                }
-            }
-            // y-faces: exclude x-boundary cells already handled above
-            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
-            for (int i = 2; i < dims[0] - 2; i++) {
-                for (int k = 1; k < dims[2] - 1; k++) {
-                    total_norm_delta += apply_stencil(i, 1, k);
-                    total_norm_delta += apply_stencil(i, dims[1] - 2, k);
-                }
-            }
-            // z-faces: exclude x- and y-boundary cells already handled above
-            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
-            for (int i = 2; i < dims[0] - 2; i++) {
-                for (int j = 2; j < dims[1] - 2; j++) {
-                    total_norm_delta += apply_stencil(i, j, 1);
-                    total_norm_delta += apply_stencil(i, j, dims[2] - 2);
-                }
+            #pragma omp parallel reduction(+ : total_norm_delta)
+            {
+                _double_grid[_grid_idx].for_all_on_shell(apply_stencil);
             }
 
-            const auto inner_size = static_cast<double>(dims[0] - 2) *
-                                    static_cast<double>(dims[1] - 2) *
-                                    static_cast<double>(dims[2] - 2);
-            node_avg_norm_delta = total_norm_delta / inner_size;
+            const auto inner_elements =
+                static_cast<double>(dims[0] - 2) *
+                static_cast<double>(dims[1] - 2) *
+                static_cast<double>(dims[2] - 2);
+            node_avg_norm_delta = total_norm_delta / inner_elements;
             global_sum_avg_norm_delta = 0.0;
         }
 

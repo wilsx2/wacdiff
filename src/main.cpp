@@ -74,15 +74,13 @@ auto solve(const pugi::xml_node &sim) -> void {
 
 inline auto static_dispatch_solve(const pugi::xml_node &sim) -> void {
     auto ic_type{child_attribute_text(sim, "initial_conditions", "type")};
-    if (ic_type == "constant") {
-        return solve<ConstantInitialConditions>(sim);
-    } else if (ic_type == "expr") {
+    if (ic_type == "expr") {
         return solve<ExpressionInitialConditions>(sim);
     }
 
     throw ConfigError{"Unsupported initial condition type \"" +
                       std::string(ic_type) +
-                      "\", only \"constant\" and \"expr\" are supported"};
+                      "\", only \"expr\" is supported"};
 }
 
 int main(int argc, char *argv[]) {
