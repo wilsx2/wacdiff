@@ -1,6 +1,5 @@
 #include <filesystem>
 
-#include "boundary.hpp"
 #include "distributed_grid.hpp"
 #include "initial_conditions.hpp"
 #include "input.hpp"
@@ -40,37 +39,6 @@ auto parse_config(const pugi::xml_node &sim)
 
     config.initial_conditions =
         InitialConditions{child_text(sim, "initial_conditions")};
-
-    auto boundary_conditions{required_child(sim, "boundary_conditions")};
-    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        auto axis{
-            required_child(boundary_conditions, "axis" + std::to_string(dim))};
-        std::string_view axis_type{axis.ensure_attribute("type").value()};
-        if (axis_type == "periodic") {
-            config.boundary_conditions[dim] = PeriodicBoundary{};
-            continue;
-        } else {
-            AxisFaces faces;
-            for (const std::string_view &name : {"first", "last"}) {
-                auto node{required_child(axis, name)};
-                std::string_view face_type{node.attribute("type").value()};
-                NonPeriodicBoundary &face{name == "first" ? faces.first
-                                                          : faces.last};
-                if (face_type == "dirichlet") {
-                    face = DirichletBoundary{child_value<double>(axis, name)};
-                } else if (face_type == "neumann") {
-                    face = NeumannBoundary{child_value<double>(axis, name)};
-                } else {
-                    throw ConfigError{
-                        "Boundary type \"" + std::string(face_type) +
-                        "\" not recognized, only \"dirichlet\" and \"neumann\" "
-                        "are valid."};
-                }
-            }
-
-            config.boundary_conditions[dim] = faces;
-        }
-    }
 
     auto convergence{required_child(sim, "convergence_conditions")};
     config.max_iterations =

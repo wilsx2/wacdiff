@@ -82,12 +82,6 @@ Simulations are fully defined by an XML file. Example:
         if (x &lt; 256/2*0.1) 0; else 100;
     </initial_conditions>
 
-    <boundary_conditions>
-        <axis0 type="periodic"/>
-        <axis1 type="periodic"/>
-        <axis2 type="periodic"/>
-    </boundary_conditions>
-
     <convergence_conditions>
         <iterations_under>10000</iterations_under>
         <avg_delta_over>0.00001</avg_delta_over>
@@ -102,23 +96,6 @@ Simulations are fully defined by an XML file. Example:
 |---|---|
 | `constant` | Fills the entire domain with a single numeric value |
 | `expr` | Evaluates an ExprTk expression at each cell's physical coordinates `x`, `y`, `z` |
-
-### Boundary Conditions (per axis)
-
-| Type | Description |
-|---|---|
-| `periodic` | Wraps the axis. opposite faces are connected |
-| `dirichlet` | Fixed temperature value on the face |
-| `neumann` | Fixed flux (gradient) on the face |
-
-Non-periodic axes specify `first` and `last` faces independently:
-
-```xml
-<axis2>
-    <first type="dirichlet">0.0</first>
-    <last  type="neumann">0.0</last>
-</axis2>
-```
 
 ## Output
 

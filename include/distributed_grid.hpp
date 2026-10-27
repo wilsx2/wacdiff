@@ -3,7 +3,6 @@
 #include "storage.hpp"
 #include <cstdint>
 
-#include "boundary.hpp"
 #include "h5raii.hpp"
 #include <H5Fpublic.h>
 #include <H5Ppublic.h>
@@ -21,14 +20,16 @@
 #include <utility>
 #include <variant>
 
+enum class FaceEnd  { First, Last };
+enum class FaceKind { Interior, Exterior };
+
 class DistributedStructuredGrid {
 public:
     static constexpr std::ptrdiff_t NDims = 3;
 
-    using AxisBoundary = std::variant<AxisFaces, PeriodicBoundary>;
-    using BoundaryConditions = const std::array<AxisBoundary, NDims> &;
     using Subarray = decltype(std::declval<boost::multi::array<double, NDims> &>()(
-        boost::multi::index_range{}, boost::multi::index_range{}));
+        boost::multi::index_range{}, boost::multi::index_range{},
+        boost::multi::index_range{}));
 
 private:
     // Data and Partitioning
@@ -36,20 +37,10 @@ private:
     std::array<int32_t, NDims> _local_size;
     std::array<int32_t, NDims> _local_start;
     std::array<int32_t, NDims> _exterior_size;
-    std::array<std::ptrdiff_t, NDims> _strides;
     boost::multi::array<double, NDims> _mdarray;
 
     // Metadata
     double _cell_size;
-
-    // Boundary Condition
-    struct NeumannFace {
-        double delta;
-        int axis;
-        FaceEnd end;
-    };
-    std::array<NeumannFace, NDims * 2> _neumann_boundaries;
-    unsigned _neumann_boundary_count;
 
     // MPI Information
     int _world_rank, _world_size;
@@ -66,18 +57,17 @@ private:
     bool _requests_in_flight;
 
     // Methods
-    auto init_topology(std::array<int, NDims> &periods) -> void;
+    auto init_topology() -> void;
     auto init_transfer_types() -> void;
     auto deinit_transfer_types() -> void;
     auto init_requests() -> void;
     auto deinit_requests() -> void;
     template <std::size_t... I>
     auto create_subarray(std::array<int, NDims> from, std::array<int, NDims> to,
-                         std::index_sequence<I...>) -> Subarray;
+                         std::index_sequence<I...>) -> Subarray {
+        return _mdarray(boost::multi::index_range{from[I], to[I]}...);
+    }
     auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
-    auto inner_subarray() -> Subarray;
-    auto set_local_boundaries(
-        const std::array<AxisBoundary, NDims> &axis_boundaries) -> void;
 
 public:
     DistributedStructuredGrid(const DistributedStructuredGrid &) = delete;
@@ -86,129 +76,26 @@ public:
     DistributedStructuredGrid &operator=(DistributedStructuredGrid &&) = delete;
     DistributedStructuredGrid(
         const std::array<int, NDims> &size,
-        BoundaryConditions boundary_specification,
         double block_size = 1, double default_value = 0);
     ~DistributedStructuredGrid();
     auto begin_halo_exchange() -> void;
     auto await_halo_exchange() -> void;
-    auto requests_in_flight() -> bool {
-        return _requests_in_flight;
-    }
-    auto inner_size() const -> std::size_t {
-        std::size_t total{1};
-        for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-            total *= static_cast<std::size_t>(_local_size[dim]);
-        }
-        return total;
-    }
-    /// Number of interior cells (indices 2 .. local_size-1). This is zero
-    /// when any local dimension is smaller than 3.
-    auto interior_size() const -> std::size_t {
-        std::size_t total{1};
-        for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-            total *= static_cast<std::size_t>(
-                std::max(0, _local_size[dim] - 2));
-        }
-        return total;
-    }
-    /// Stride, in elements, along one logical dimension of the local grid.
-    auto stride(std::ptrdiff_t dim) const -> std::ptrdiff_t {
-        return _strides[dim];
-    }
-    /// Maps a flat index in [0, inner_size()) to an offset into
-    /// local_grid().base() for the corresponding inner cell.
-    auto inner_offset(std::size_t linear) const -> std::ptrdiff_t {
-        std::ptrdiff_t offset{0};
-        std::size_t remaining{linear};
-        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-            const auto coord{remaining %
-                             static_cast<std::size_t>(_local_size[dim])};
-            remaining /= static_cast<std::size_t>(_local_size[dim]);
-            offset += static_cast<std::ptrdiff_t>(coord + 1) * _strides[dim];
-        }
-        return offset;
-    }
-    /// Maps a flat index in [0, interior_size()) to an offset into
-    /// local_grid().base() for the corresponding interior cell.
-    auto interior_offset(std::size_t linear) const -> std::ptrdiff_t {
-        std::ptrdiff_t offset{0};
-        std::size_t remaining{linear};
-        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-            const auto extent{static_cast<std::size_t>(
-                std::max(0, _local_size[dim] - 2))};
-            if (extent == 0) {
-                return 0;
-            }
-            const auto coord{remaining % extent};
-            remaining /= extent;
-            offset += static_cast<std::ptrdiff_t>(coord + 2) * _strides[dim];
-        }
-        return offset;
-    }
-    /// Number of shell cells (inner cells adjacent to the halo).
-    auto shell_size() const -> std::size_t {
-        return inner_size() - interior_size();
-    }
-    /// Maps a flat index in [0, shell_size()) to an offset into
-    /// local_grid().base() for the corresponding shell cell.
-    auto shell_offset(std::size_t linear) const -> std::ptrdiff_t {
-        const auto l0{static_cast<std::size_t>(_local_size[0])};
-        const auto l1{static_cast<std::size_t>(_local_size[1])};
-        const auto l2{static_cast<std::size_t>(_local_size[2])};
-        if (l0 < 3 || l1 < 3 || l2 < 3) {
-            return inner_offset(linear);
-        }
-
-        auto offset_of{[&](std::size_t i, std::size_t j, std::size_t k) {
-            return static_cast<std::ptrdiff_t>(i) * _strides[0] +
-                   static_cast<std::ptrdiff_t>(j) * _strides[1] +
-                   static_cast<std::ptrdiff_t>(k) * _strides[2];
-        }};
-
-        const auto b0{l1 * l2};
-        const auto b1{b0};
-        const auto b2{(l0 - 2) * l2};
-        const auto b3{b2};
-        const auto b4{(l0 - 2) * (l1 - 2)};
-
-        auto remaining{linear};
-        if (remaining < b0) {
-            const auto j{remaining / l2 + 1};
-            const auto k{remaining % l2 + 1};
-            return offset_of(1, j, k);
-        }
-        remaining -= b0;
-        if (remaining < b1) {
-            const auto j{remaining / l2 + 1};
-            const auto k{remaining % l2 + 1};
-            return offset_of(l0, j, k);
-        }
-        remaining -= b1;
-        if (remaining < b2) {
-            const auto i{remaining / l2 + 2};
-            const auto k{remaining % l2 + 1};
-            return offset_of(i, 1, k);
-        }
-        remaining -= b2;
-        if (remaining < b3) {
-            const auto i{remaining / l2 + 2};
-            const auto k{remaining % l2 + 1};
-            return offset_of(i, l1, k);
-        }
-        remaining -= b3;
-        if (remaining < b4) {
-            const auto i{remaining / (l1 - 2) + 2};
-            const auto j{remaining % (l1 - 2) + 2};
-            return offset_of(i, j, 1);
-        }
-        remaining -= b4;
-        const auto i{remaining / (l1 - 2) + 2};
-        const auto j{remaining % (l1 - 2) + 2};
-        return offset_of(i, j, l2);
-    }
     auto fill(double value) {
+        // WARN: NUMA!
         auto elements{inner_subarray().elements()};
         std::fill(elements.begin(), elements.end(), value);
+    }
+    auto inner_subarray() -> Subarray {
+        const auto &dims = _exterior_size;
+        return create_subarray({1, 1, 1},
+                               {dims[0] - 1, dims[1] - 1, dims[2] - 1},
+                               std::make_index_sequence<NDims>{});
+    }
+    auto shell_subarray() -> Subarray {
+        const auto &dims = _exterior_size;
+        return create_subarray({2, 2, 2},
+                               {dims[0] - 2, dims[1] - 2, dims[2] - 2},
+                               std::make_index_sequence<NDims>{});
     }
     auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }
     auto local_grid() const -> const boost::multi::array<double, NDims> & {
@@ -216,6 +103,9 @@ public:
     }
     auto local_size() const -> const std::array<int, NDims> & {
         return _local_size;
+    }
+    auto exterior_size() const -> const std::array<int, NDims> & {
+        return _exterior_size;
     }
     auto local_start() const -> const std::array<int, NDims> & {
         return _local_start;

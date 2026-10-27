@@ -22,12 +22,6 @@
         ((x - (64*0.1)/2)^2 + (y - (64*0.1)/2)^2 + (z - (64*0.1)/2)^2)^(1/2);
     </initial_conditions>
 
-    <boundary_conditions>
-        <axis0 type="periodic"/>
-        <axis1 type="periodic"/>
-        <axis2 type="periodic"/>
-    </boundary_conditions>
-
     <convergence_conditions>
         <iterations_under>10000</iterations_under>
         <avg_delta_over>0.0</avg_delta_over>

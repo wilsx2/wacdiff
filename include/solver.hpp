@@ -19,8 +19,6 @@ public:
         double space_step;
         // Initial Conditions
         InitialConditionUnion initial_conditions;
-        // Boundary Conditions
-        std::array<DistributedStructuredGrid::AxisBoundary, DistributedStructuredGrid::NDims> boundary_conditions;
         // Convergence Params
         double epsilon;
         unsigned max_iterations;

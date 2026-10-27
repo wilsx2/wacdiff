@@ -1,5 +1,4 @@
 #include "distributed_grid.hpp"
-#include "boundary.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,9 +27,10 @@ auto format_array(const Array &values) -> std::string {
 }
 } // namespace
 
-auto DistributedStructuredGrid::init_topology(std::array<int, NDims> &periods)
+auto DistributedStructuredGrid::init_topology()
     -> void {
     /// Cartesian grid
+    std::array<int, NDims> periods{true, true, true};
     std::fill(_cart_dims.begin(), _cart_dims.end(), 0);
     MPI_Dims_create(_world_size, NDims, _cart_dims.data());
     MPI_Cart_create(MPI_COMM_WORLD, NDims, _cart_dims.data(), periods.data(), 0,
@@ -163,24 +163,6 @@ auto DistributedStructuredGrid::deinit_requests() -> void {
     }
 }
 
-template <std::size_t... I>
-auto DistributedStructuredGrid::create_subarray(std::array<int, NDims> from,
-                                                std::array<int, NDims> to,
-                                                std::index_sequence<I...>)
-    -> Subarray {
-    return _mdarray(boost::multi::index_range{from[I], to[I]}...);
-}
-
-auto DistributedStructuredGrid::inner_subarray() -> Subarray {
-    std::array<int, NDims> inner_from, inner_to;
-    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        inner_from[dim] = 1;
-        inner_to[dim] = _local_size[dim] + 1;
-    }
-    return create_subarray(inner_from, inner_to,
-                           std::make_index_sequence<NDims>{});
-}
-
 auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
                                          FaceKind kind) -> Subarray {
     std::array<int, NDims> from;
@@ -215,39 +197,8 @@ auto DistributedStructuredGrid::get_face(std::ptrdiff_t axis, FaceEnd end,
     return create_subarray(from, to, std::make_index_sequence<NDims>{});
 }
 
-auto DistributedStructuredGrid::set_local_boundaries(
-    const std::array<AxisBoundary, NDims> &axis_boundaries) -> void {
-    _neumann_boundary_count = 0;
-
-    auto apply_boundary{[&](int axis, FaceEnd end) {
-        auto interior_face{get_face(axis, end, FaceKind::Interior)};
-        auto exterior_face{get_face(axis, end, FaceKind::Exterior)};
-        const auto &faces{std::get<AxisFaces>(axis_boundaries[axis])};
-        const NonPeriodicBoundary &boundary{end == FaceEnd::First ? faces.first
-                                                                  : faces.last};
-
-        if (const auto *dirichlet = std::get_if<DirichletBoundary>(&boundary)) {
-            DirichletApplicator{dirichlet->value, std::move(exterior_face)}
-                .apply();
-        } else {
-            const auto *neumann{std::get_if<NeumannBoundary>(&boundary)};
-            assert(neumann != nullptr);
-            _neumann_boundaries[_neumann_boundary_count++] = {
-                neumann->delta, axis, end};
-        }
-    }};
-
-    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        if (_cart_neighbors[dim].first == MPI_PROC_NULL)
-            apply_boundary(dim, FaceEnd::First);
-        if (_cart_neighbors[dim].second == MPI_PROC_NULL)
-            apply_boundary(dim, FaceEnd::Last);
-    }
-}
-
 DistributedStructuredGrid::DistributedStructuredGrid(
-    const std::array<int, NDims> &size, BoundaryConditions boundary_specification,
-    double cell_size, double default_value)
+    const std::array<int, NDims> &size, double cell_size, double default_value)
     : _cell_size(cell_size) {
     MPI_Comm_rank(MPI_COMM_WORLD, &_world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &_world_size);
@@ -255,33 +206,15 @@ DistributedStructuredGrid::DistributedStructuredGrid(
     SPDLOG_DEBUG("Process {}/{} (rank {})", _world_rank + 1, _world_size,
                  _world_rank);
 
-    std::array<int, NDims> periods{};
-    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        periods[dim] =
-            std::get_if<PeriodicBoundary>(&boundary_specification[dim]) !=
-            nullptr;
-    }
-    init_topology(periods);
+    init_topology();
 
-    _strides[NDims - 1] = 1;
-    for (std::ptrdiff_t dim = NDims - 2; dim >= 0; --dim) {
-        _strides[dim] = _strides[dim + 1] * _exterior_size[dim + 1];
-    }
-
-    std::array<std::ptrdiff_t, NDims> extensions;
-    for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        extensions[dim] = _exterior_size[dim];
-    }
-    auto extents{std::apply(
-        [](auto... s) {
-            return boost::multi::extents_t<NDims>(
-                static_cast<std::ptrdiff_t>(s)...);
-        },
-        extensions)};
-    _mdarray = boost::multi::array<double, NDims>(extents, default_value);
+    auto extents = boost::multi::extents_t<NDims>(
+        _exterior_size[0],
+        _exterior_size[1],
+        _exterior_size[2]);
+    _mdarray = boost::multi::array<double, NDims>(extents, default_value); // WARN: NUMA!
 
     init_transfer_types();
-    set_local_boundaries(boundary_specification);
     init_requests();
 }
 
@@ -300,13 +233,6 @@ auto DistributedStructuredGrid::begin_halo_exchange() -> void {
 
 auto DistributedStructuredGrid::await_halo_exchange() -> void {
     if (_requests_in_flight) {
-        for (auto i = 0u; i < _neumann_boundary_count; ++i) {
-            const auto &face{_neumann_boundaries[i]};
-            NeumannApplicator{face.delta,
-                              get_face(face.axis, face.end, FaceKind::Exterior),
-                              get_face(face.axis, face.end, FaceKind::Interior)}
-                .apply();
-        }
         std::array<MPI_Status, NDims * 4> statuses;
         MPI_Waitall(_requests.size(), _requests.data(), statuses.data());
         _requests_in_flight = false;

@@ -1,5 +1,4 @@
 #include "solver.hpp"
-#include "index_for_each.hpp"
 #include "initial_conditions.hpp"
 #include "timing.hpp"
 
@@ -17,10 +16,8 @@ SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
              (_constants.time_step /
               (_constants.space_step * _constants.space_step))),
       _double_grid{DistributedStructuredGrid{_constants.domain_size,
-                                             _constants.boundary_conditions,
                                              _constants.space_step},
                    DistributedStructuredGrid{_constants.domain_size,
-                                             _constants.boundary_conditions,
                                              _constants.space_step}},
       _grid_idx{false} {
     std::visit(InitialConditionVisitor{_double_grid[_grid_idx]},
@@ -38,11 +35,6 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
     auto converged{false};
 
     constexpr auto NDims{DistributedStructuredGrid::NDims};
-    constexpr auto NumNeighbors{NDims * 2};
-
-    const auto inner_size{_double_grid[0].inner_size()};
-    const auto interior_size{_double_grid[0].interior_size()};
-    const auto shell_size{_double_grid[0].shell_size()};
 
     if (_constants.storage_interval != 0) {
         _archive->append_state(_double_grid[_grid_idx], current_iterations,
@@ -51,38 +43,26 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
     // Perform simulation
     while (!converged) {
-        auto &curr{_double_grid[_grid_idx].local_grid()};
-        auto &next{_double_grid[!_grid_idx].local_grid()};
-        auto *curr_data{curr.base()};
-        auto *next_data{next.base()};
-        const std::array<std::ptrdiff_t, NDims> strides{
-            _double_grid[_grid_idx].stride(0),
-            _double_grid[_grid_idx].stride(1),
-            _double_grid[_grid_idx].stride(2)};
+        auto &curr = _double_grid[_grid_idx].local_grid();
+        auto &next = _double_grid[!_grid_idx].local_grid();
+        const auto &dims = _double_grid[_grid_idx].exterior_size();
+        auto apply_stencil = [&](int i, int j, int k) {
+            constexpr auto NumNeighbors = static_cast<double>(NDims * 2);
+            const auto neighbor_sum =
+                curr[i + 1][j][k] + curr[i - 1][j][k] +
+                curr[i][j + 1][k] + curr[i][j - 1][k] +
+                curr[i][j][k + 1] + curr[i][j][k - 1];
+            const auto delta =
+                _gamma * (neighbor_sum - NumNeighbors * curr[i][j][k]);
 
-        auto apply_stencil{[&, strides](std::ptrdiff_t center) {
-            double neighbor_sum{0};
-            static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
-            for_each_index(
-                [&](auto D) {
-                    constexpr auto dim{decltype(D)::value};
-                    const auto stride{strides[dim]};
-                    neighbor_sum += curr_data[center - stride] +
-                                    curr_data[center + stride];
-                },
-                DimSeq);
-
-            const auto delta{
-                _gamma * (neighbor_sum - static_cast<double>(NumNeighbors) *
-                                             curr_data[center])};
-            next_data[center] = curr_data[center] + delta;
+            next[i][j][k] = curr[i][j][k] + delta;
             return delta * delta;
-        }};
+        };
 
-        double interior_norm_delta{0.0};
-        double node_avg_norm_delta{0.0};
-        double global_sum_avg_norm_delta{0.0};
-        double avg_norm_delta{0.0};
+        auto total_norm_delta = 0.0;
+        auto node_avg_norm_delta = 0.0;
+        auto global_sum_avg_norm_delta = 0.0;
+        auto avg_norm_delta = 0.0;
 
         {
             #ifdef WACDIFF_PROFILING
@@ -91,11 +71,16 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
             _double_grid[_grid_idx].begin_halo_exchange();
 
-            interior_norm_delta = 0.0;
-#pragma omp parallel for reduction(+ : interior_norm_delta)
-            for (std::size_t linear = 0; linear < interior_size; ++linear) {
-                interior_norm_delta += apply_stencil(
-                    _double_grid[_grid_idx].interior_offset(linear));
+            total_norm_delta = 0.0;
+            // TODO: vectorize
+            // Inner computation (does not depend on halo)
+            #pragma omp parallel for schedule(static) collapse(3) reduction(+ : total_norm_delta)
+            for (int i = 2; i < dims[0] - 2; i++) {
+                for (int j = 2; j < dims[1] - 2; j++) {
+                    for (int k = 2; k < dims[2] - 2; k++) {
+                        total_norm_delta += apply_stencil(i, j, k);
+                    }
+                }
             }
         }
 
@@ -104,9 +89,7 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             auto timer = ScopedTimer(Phase::Communication);
             #endif
 
-            // Halos are valid now; finish the shell cells that read them.
             _double_grid[_grid_idx].await_halo_exchange();
-            assert(!_double_grid[_grid_idx].requests_in_flight());
         }
 
         {
@@ -114,17 +97,36 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
             auto timer = ScopedTimer(Phase::Computation);
             #endif
 
-            auto shell_norm_delta{0.0};
-#pragma omp parallel for reduction(+ : shell_norm_delta)
-            for (std::size_t linear = 0; linear < shell_size; ++linear) {
-                shell_norm_delta += apply_stencil(
-                    _double_grid[_grid_idx].shell_offset(linear));
+            // Shell computation (disjoint face/edge decomposition)
+            // x-faces: full y-z range, including y/z boundaries
+            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
+            for (int j = 1; j < dims[1] - 1; j++) {
+                for (int k = 1; k < dims[2] - 1; k++) {
+                    total_norm_delta += apply_stencil(1, j, k);
+                    total_norm_delta += apply_stencil(dims[0] - 2, j, k);
+                }
+            }
+            // y-faces: exclude x-boundary cells already handled above
+            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
+            for (int i = 2; i < dims[0] - 2; i++) {
+                for (int k = 1; k < dims[2] - 1; k++) {
+                    total_norm_delta += apply_stencil(i, 1, k);
+                    total_norm_delta += apply_stencil(i, dims[1] - 2, k);
+                }
+            }
+            // z-faces: exclude x- and y-boundary cells already handled above
+            #pragma omp parallel for schedule(static) collapse(2) reduction(+ : total_norm_delta)
+            for (int i = 2; i < dims[0] - 2; i++) {
+                for (int j = 2; j < dims[1] - 2; j++) {
+                    total_norm_delta += apply_stencil(i, j, 1);
+                    total_norm_delta += apply_stencil(i, j, dims[2] - 2);
+                }
             }
 
-            auto total_norm_delta{interior_norm_delta + shell_norm_delta};
-
-            node_avg_norm_delta =
-                total_norm_delta / static_cast<double>(inner_size);
+            const auto inner_size = static_cast<double>(dims[0] - 2) *
+                                    static_cast<double>(dims[1] - 2) *
+                                    static_cast<double>(dims[2] - 2);
+            node_avg_norm_delta = total_norm_delta / inner_size;
             global_sum_avg_norm_delta = 0.0;
         }
 

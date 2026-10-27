@@ -1,5 +1,4 @@
 #include "initial_conditions.hpp"
-#include "index_for_each.hpp"
 
 #include "input.hpp"
 #include <array>
@@ -77,35 +76,27 @@ ExpressionInitialConditions &ExpressionInitialConditions::operator=(
 ExpressionInitialConditions::~ExpressionInitialConditions() = default;
 
 auto ExpressionInitialConditions::apply(DistributedStructuredGrid &domain) const -> void {
-    constexpr auto NDims{DistributedStructuredGrid::NDims};
     auto &grid{domain.local_grid()};
     const auto &local_size{domain.local_size()};
-    const auto inner_size{domain.inner_size()};
 
-    for (std::size_t linear = 0; linear < inner_size; ++linear) {
-        std::array<std::ptrdiff_t, NDims> coordinate{};
-        std::ptrdiff_t offset{0};
-        std::size_t remaining{linear};
-        for (std::ptrdiff_t dim = NDims - 1; dim >= 0; --dim) {
-            coordinate[dim] =
-                static_cast<std::ptrdiff_t>(
-                    remaining % static_cast<std::size_t>(local_size[dim])) +
-                1;
-            remaining /= static_cast<std::size_t>(local_size[dim]);
-            offset += coordinate[dim] * domain.stride(dim);
-        }
-
-        static constexpr auto DimSeq{std::make_index_sequence<NDims>{}};
-        for_each_index(
-            [&](auto D) {
-                std::get<decltype(D)::value>(_impl->coordinate) =
-                    (static_cast<double>(
-                         domain.local_start()[decltype(D)::value]) +
-                     static_cast<double>(
-                         std::get<decltype(D)::value>(coordinate))) *
+    // WARN: NUMA! Threads have to compete over expression
+    //       They should have a copy
+    #pragma omp parallel for schedule(static) collapse(3)
+    for (std::ptrdiff_t i = 0; i < local_size[0]; ++i) {
+        for (std::ptrdiff_t j = 0; j < local_size[1]; ++j) {
+            for (std::ptrdiff_t k = 0; k < local_size[2]; ++k) {
+                std::get<0>(_impl->coordinate) =
+                    static_cast<double>(domain.local_start()[0] + i + 1) *
                     domain.cell_size();
-            },
-            DimSeq);
-        grid.base()[offset] = _impl->expression.value();
+                std::get<1>(_impl->coordinate) =
+                    static_cast<double>(domain.local_start()[1] + j + 1) *
+                    domain.cell_size();
+                std::get<2>(_impl->coordinate) =
+                    static_cast<double>(domain.local_start()[2] + k + 1) *
+                    domain.cell_size();
+
+                grid[i + 1][j + 1][k + 1] = _impl->expression.value();
+            }
+        }
     }
 }
