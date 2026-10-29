@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -69,6 +70,20 @@ private:
     }
     auto get_face(std::ptrdiff_t axis, FaceEnd end, FaceKind kind) -> Subarray;
 
+    template <typename F>
+    static auto invoke_summand(F &f, std::ptrdiff_t i, std::ptrdiff_t j,
+                               std::ptrdiff_t k) -> double {
+        using Result = std::invoke_result_t<F &, std::ptrdiff_t,
+                                            std::ptrdiff_t, std::ptrdiff_t>;
+        if constexpr (std::is_void_v<Result>) {
+            f(i, j, k);
+            return 0.0;
+        } else {
+            static_assert(std::is_integral_v<Result>)
+            return f(i, j, k);
+        }
+    }
+
 public:
     DistributedStructuredGrid(const DistributedStructuredGrid &) = delete;
     DistributedStructuredGrid &operator=(const DistributedStructuredGrid &) = delete;
@@ -111,47 +126,49 @@ public:
     auto cell_size() const -> double { return _cell_size; }
 
     template <typename F>
-    auto for_all_in_shell(F&& f) -> void {
-        // NOTE: Still requires an 'omp parallel'
+    auto for_all_in_shell(F&& f) -> double {
         const auto &dims = _exterior_size;
+        auto sum = 0.0;
 
-        #pragma omp for schedule(static) collapse(2)
+        #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t j = 1; j < dims[1] - 1; j++) {
             for (std::ptrdiff_t k = 1; k < dims[2] - 1; k++) {
-                f(1, j, k);
-                f(dims[0] - 2, j, k);
+                sum += invoke_summand(f, 1, j, k);
+                sum += invoke_summand(f, dims[0] - 2, j, k);
             }
         }
-        #pragma omp for schedule(static) collapse(2)
+        #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t k = 1; k < dims[2] - 1; k++) {
-                f(i, 1, k);
-                f(i, dims[1] - 2, k);
+                sum += invoke_summand(f, i, 1, k);
+                sum += invoke_summand(f, i, dims[1] - 2, k);
             }
         }
-        #pragma omp for schedule(static) collapse(2)
+        #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t j = 2; j < dims[1] - 2; j++) {
-                f(i, j, 1);
-                f(i, j, dims[2] - 2);
+                sum += invoke_summand(f, i, j, 1);
+                sum += invoke_summand(f, i, j, dims[2] - 2);
             }
         }
+        return sum;
     }
 
     template <typename F>
-    auto for_all_on_shell(F&& f) {
-        // NOTE: Still requires an 'omp parallel'
+    auto for_all_on_shell(F&& f) -> double {
         const auto &dims = _exterior_size;
+        auto sum = 0.0;
 
-        #pragma omp for schedule(static) collapse(2)
+        #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t j = 2; j < dims[1] - 2; j++) {
-                #pragma omp simd
+                #pragma omp simd reduction(+ : sum)
                 for (std::ptrdiff_t k = 2; k < dims[2] - 2; k++) {
-                    f(i, j, k);
+                    sum += invoke_summand(f, i, j, k);
                 }
             }
         }
+        return sum;
     }
 
     auto comm() const -> MPI_Comm { return _cart_comm; }
