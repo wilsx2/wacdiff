@@ -124,26 +124,27 @@ public:
     auto for_all_in_shell(F&& f) -> double {
         const auto &dims = _exterior_size;
         auto sum = 0.0;
+        auto local_f = f;
 
         #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t j = 1; j < dims[1] - 1; j++) {
             for (std::ptrdiff_t k = 1; k < dims[2] - 1; k++) {
-                sum += invoke_summand(f, 1, j, k);
-                sum += invoke_summand(f, dims[0] - 2, j, k);
+                sum += invoke_summand(local_f, 1, j, k);
+                sum += invoke_summand(local_f, dims[0] - 2, j, k);
             }
         }
         #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t k = 1; k < dims[2] - 1; k++) {
-                sum += invoke_summand(f, i, 1, k);
-                sum += invoke_summand(f, i, dims[1] - 2, k);
+                sum += invoke_summand(local_f, i, 1, k);
+                sum += invoke_summand(local_f, i, dims[1] - 2, k);
             }
         }
         #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t j = 2; j < dims[1] - 2; j++) {
-                sum += invoke_summand(f, i, j, 1);
-                sum += invoke_summand(f, i, j, dims[2] - 2);
+                sum += invoke_summand(local_f, i, j, 1);
+                sum += invoke_summand(local_f, i, j, dims[2] - 2);
             }
         }
         return sum;
@@ -153,13 +154,14 @@ public:
     auto for_all_on_shell(F&& f) -> double {
         const auto &dims = _exterior_size;
         auto sum = 0.0;
+        auto local_f = f;
 
         #pragma omp for schedule(static) collapse(2) nowait
         for (std::ptrdiff_t i = 2; i < dims[0] - 2; i++) {
             for (std::ptrdiff_t j = 2; j < dims[1] - 2; j++) {
                 #pragma omp simd reduction(+ : sum)
                 for (std::ptrdiff_t k = 2; k < dims[2] - 2; k++) {
-                    sum += invoke_summand(f, i, j, k);
+                    sum += invoke_summand(local_f, i, j, k);
                 }
             }
         }

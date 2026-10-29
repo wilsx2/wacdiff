@@ -49,22 +49,25 @@ auto SpmdFdmExplicitHeatEqSolver::run() -> void {
 
         auto &curr = _double_grid[_grid_idx].local_grid();
         auto &next = _double_grid[!_grid_idx].local_grid();
+
         const auto &dims = _double_grid[_grid_idx].exterior_size();
-        // Local copy: a member read through 'this' could alias the stores to
-        // 'next', forcing a reload every cell
         const auto gamma = _gamma;
-        // Returns the squared delta; the caller's loop reduces it
-        auto apply_stencil = [&](std::ptrdiff_t i, std::ptrdiff_t j,
+        const double *c = curr.base();
+        double *n = next.base();
+        const std::ptrdiff_t sj = dims[2];
+        const std::ptrdiff_t si =
+            static_cast<std::ptrdiff_t>(dims[1]) * dims[2];
+        auto apply_stencil = [=](std::ptrdiff_t i, std::ptrdiff_t j,
                                  std::ptrdiff_t k) -> double {
             constexpr auto NumNeighbors = static_cast<double>(NDims * 2);
+            const auto idx = i * si + j * sj + k;
             const auto neighbor_sum =
-                curr[i + 1][j][k] + curr[i - 1][j][k] +
-                curr[i][j + 1][k] + curr[i][j - 1][k] +
-                curr[i][j][k + 1] + curr[i][j][k - 1];
-            const auto delta =
-                gamma * (neighbor_sum - NumNeighbors * curr[i][j][k]);
+                c[idx + si] + c[idx - si] +
+                c[idx + sj] + c[idx - sj] +
+                c[idx + 1] + c[idx - 1];
+            const auto delta = gamma * (neighbor_sum - NumNeighbors * c[idx]);
 
-            next[i][j][k] = curr[i][j][k] + delta;
+            n[idx] = c[idx] + delta;
             return delta * delta;
         };
 
