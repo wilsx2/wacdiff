@@ -1,6 +1,7 @@
 #pragma once
 
 #include "distributed_grid.hpp"
+#include "archive.hpp"
 #include "initial_conditions.hpp"
 
 #include <mpi.h>
@@ -32,7 +33,7 @@ private:
     std::array<DistributedStructuredGrid, 2> _double_grid;
     bool _grid_idx;
 
-    std::optional<DSGArchive> _archive;
+    std::optional<Archive> _archive;
 
 public:
     SpmdFdmExplicitHeatEqSolver() = delete;

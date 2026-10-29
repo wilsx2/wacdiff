@@ -1,16 +1,11 @@
 #pragma once
 
-#include "storage.hpp"
 #include <cstdint>
 
-#include "h5raii.hpp"
-#include <H5Fpublic.h>
-#include <H5Ppublic.h>
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdlib>
-#include <hdf5.h>
 #include <mpi.h>
 #include <multi/array.hpp>
 #include <spdlog/spdlog.h>
@@ -79,7 +74,7 @@ private:
             f(i, j, k);
             return 0.0;
         } else {
-            static_assert(std::is_integral_v<Result>)
+            static_assert(std::is_arithmetic_v<Result>);
             return f(i, j, k);
         }
     }
@@ -174,27 +169,4 @@ public:
     auto comm() const -> MPI_Comm { return _cart_comm; }
     auto world_rank() const -> int { return _world_rank; }
     auto world_size() const -> int { return _world_size; }
-};
-
-class DSGArchive : public Archive<DistributedStructuredGrid> {
-private:
-    using DSG  = DistributedStructuredGrid;
-    using Base = Archive<DSG>;
-
-    static constexpr std::ptrdiff_t NDims = DistributedStructuredGrid::NDims;
-
-    std::array<hsize_t, NDims> _cached_global_size;
-    std::array<hsize_t, NDims> _cached_local_start;
-    std::array<hsize_t, NDims> _cached_local_size;
-    std::array<hsize_t, NDims> _cached_exterior_size;
-    std::string _label;
-    double _block_size;
-
-    void write_light_data(const DSG &state, int step, double time);
-    void write_heavy_data(const DSG &state, int step);
-
-public:
-    DSGArchive(std::string filename, std::string label, double block_size,
-               const DSG &grid);
-    void append_state(const DSG &state, int step, double time);
 };

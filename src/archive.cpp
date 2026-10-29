@@ -1,4 +1,7 @@
-#include "distributed_grid.hpp"
+#include "archive.hpp"
+
+#include <filesystem>
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <array>
@@ -34,7 +37,7 @@ auto repeat_joined(const std::string &value, std::size_t count) -> std::string {
 }
 } // namespace
 
-void DSGArchive::write_light_data(const DSG &state, int step, double time) {
+void Archive::write_light_data(const DSG &state, int step, double time) {
     auto grid{
         this->_light_file.child("Xdmf").child("Domain").child("Grid").append_child(
             "Grid")};
@@ -101,35 +104,49 @@ void DSGArchive::write_light_data(const DSG &state, int step, double time) {
     }
 }
 
-void DSGArchive::write_heavy_data(const DSG &state, int step) {
+void Archive::write_heavy_data(const DSG &state, int step) {
     // https://cvw.cac.cornell.edu/parallel-io-libraries/phdf5/file-operations
-    H5Dataspace dataspace{NDims, _cached_global_size.data()};
+    hid_t dataspace{H5Screate_simple(NDims, _cached_global_size.data(), nullptr)};
 
     auto name{std::to_string(step)};
-    H5Dataset dataset{*this->_heavy_file, name.data(), H5T_NATIVE_DOUBLE, *dataspace};
+    hid_t dataset{H5Dcreate(_heavy_file, name.c_str(), H5T_NATIVE_DOUBLE,
+                            dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT)};
 
-    H5Sselect_hyperslab(*dataspace, H5S_SELECT_SET, _cached_local_start.data(),
+    H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, _cached_local_start.data(),
                         nullptr, _cached_local_size.data(), nullptr);
     std::array<hsize_t, NDims> interior_start;
     std::fill(interior_start.begin(), interior_start.end(), 1);
-    H5Dataspace memoryspace{NDims, _cached_exterior_size.data()};
-    H5Sselect_hyperslab(*memoryspace, H5S_SELECT_SET, interior_start.data(),
+    hid_t memoryspace{
+        H5Screate_simple(NDims, _cached_exterior_size.data(), nullptr)};
+    H5Sselect_hyperslab(memoryspace, H5S_SELECT_SET, interior_start.data(),
                         nullptr, _cached_local_size.data(), nullptr);
 
-    auto dxpl{H5Pcreate(H5P_DATASET_XFER)};
-
+    hid_t dxpl{H5Pcreate(H5P_DATASET_XFER)};
     H5Pset_dxpl_mpio(dxpl, H5FD_MPIO_COLLECTIVE);
 
-    H5Dwrite(*dataset, H5T_NATIVE_DOUBLE, *memoryspace, *dataspace, dxpl,
+    H5Dwrite(dataset, H5T_NATIVE_DOUBLE, memoryspace, dataspace, dxpl,
              state.local_grid().base());
 
     H5Pclose(dxpl);
+    H5Sclose(memoryspace);
+    H5Dclose(dataset);
+    H5Sclose(dataspace);
 }
 
-DSGArchive::DSGArchive(std::string filename, std::string label,
-                       double block_size, const DSG &grid)
-    : Base(filename, grid.comm(), grid.world_rank()), _label(label),
+Archive::Archive(const std::string &file_prefix, std::string label,
+                 double block_size, const DSG &grid)
+    : _rank(grid.world_rank()), _light_data_filename(file_prefix + ".xmf"),
+      _heavy_data_filename(file_prefix + ".h5"), _label(label),
       _block_size(block_size) {
+    hid_t fapl{H5Pcreate(H5P_FILE_ACCESS)};
+    H5Pset_fapl_mpio(fapl, grid.comm(), MPI_INFO_NULL);
+    _heavy_file =
+        H5Fcreate(_heavy_data_filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
+    H5Pclose(fapl);
+
+    if (_rank == 0)
+        std::filesystem::remove(_light_data_filename);
+
     std::transform(grid.global_size().begin(), grid.global_size().end(),
                    _cached_global_size.begin(),
                    [](int32_t v) { return static_cast<hsize_t>(v); });
@@ -155,7 +172,16 @@ DSGArchive::DSGArchive(std::string filename, std::string label,
     }
 }
 
-void DSGArchive::append_state(const DSG &state, int step, double time) {
+Archive::~Archive() {
+    if (_rank == 0) {
+        if (!_light_file.save_file(_light_data_filename.c_str())) {
+            SPDLOG_ERROR("Final light file write failed");
+        }
+    }
+    H5Fclose(_heavy_file);
+}
+
+void Archive::append_state(const DSG &state, int step, double time) {
     write_heavy_data(state, step);
     if (state.world_rank() == 0) {
         write_light_data(state, step, time);
