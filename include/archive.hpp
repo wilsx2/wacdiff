@@ -25,6 +25,7 @@ private:
     std::array<hsize_t, NDims> _cached_local_start;
     std::array<hsize_t, NDims> _cached_local_size;
     std::array<hsize_t, NDims> _cached_exterior_size;
+    std::array<hsize_t, NDims> _cached_chunk_size;
     std::string _label;
     double _block_size;
 

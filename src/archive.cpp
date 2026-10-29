@@ -6,6 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <numeric>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -106,31 +110,61 @@ void Archive::write_light_data(const DSG &state, int step, double time) {
 
 void Archive::write_heavy_data(const DSG &state, int step) {
     // https://cvw.cac.cornell.edu/parallel-io-libraries/phdf5/file-operations
-    hid_t dataspace{H5Screate_simple(NDims, _cached_global_size.data(), nullptr)};
+    hid_t dataspace = H5Screate_simple(NDims, _cached_global_size.data(), nullptr);
 
-    auto name{std::to_string(step)};
-    hid_t dataset{H5Dcreate(_heavy_file, name.c_str(), H5T_NATIVE_DOUBLE,
-                            dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT)};
+    auto name = std::to_string(step);
+    hid_t dcpl = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_chunk(dcpl, NDims, _cached_chunk_size.data());
+    H5Pset_fill_time(dcpl, H5D_FILL_TIME_NEVER);
 
-    H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, _cached_local_start.data(),
-                        nullptr, _cached_local_size.data(), nullptr);
+    hid_t dataset = H5Dcreate(
+        _heavy_file,
+        name.c_str(),
+        H5T_NATIVE_DOUBLE,
+        dataspace,
+        H5P_DEFAULT,
+        dcpl,
+        H5P_DEFAULT);
+
+    H5Sselect_hyperslab(
+        dataspace,
+        H5S_SELECT_SET,
+        _cached_local_start.data(),
+        nullptr,
+        _cached_local_size.data(),
+        nullptr);
+
     std::array<hsize_t, NDims> interior_start;
     std::fill(interior_start.begin(), interior_start.end(), 1);
-    hid_t memoryspace{
-        H5Screate_simple(NDims, _cached_exterior_size.data(), nullptr)};
-    H5Sselect_hyperslab(memoryspace, H5S_SELECT_SET, interior_start.data(),
-                        nullptr, _cached_local_size.data(), nullptr);
+    hid_t memoryspace = H5Screate_simple(
+        NDims,
+        _cached_exterior_size.data(),
+        nullptr);
+    H5Sselect_hyperslab(
+        memoryspace,
+        H5S_SELECT_SET,
+        interior_start.data(),
+        nullptr,
+        _cached_local_size.data(),
+        nullptr);
 
-    hid_t dxpl{H5Pcreate(H5P_DATASET_XFER)};
+    hid_t dxpl = H5Pcreate(H5P_DATASET_XFER);
     H5Pset_dxpl_mpio(dxpl, H5FD_MPIO_COLLECTIVE);
 
-    H5Dwrite(dataset, H5T_NATIVE_DOUBLE, memoryspace, dataspace, dxpl,
-             state.local_grid().base());
+    H5Dwrite(
+        dataset,
+        H5T_NATIVE_DOUBLE,
+        memoryspace,
+        dataspace,
+        dxpl,
+        state.local_grid().base());
 
     H5Pclose(dxpl);
+
     H5Sclose(memoryspace);
     H5Dclose(dataset);
     H5Sclose(dataspace);
+    H5Pclose(dcpl);
 }
 
 Archive::Archive(const std::string &file_prefix, std::string label,
@@ -138,10 +172,30 @@ Archive::Archive(const std::string &file_prefix, std::string label,
     : _rank(grid.world_rank()), _light_data_filename(file_prefix + ".xmf"),
       _heavy_data_filename(file_prefix + ".h5"), _label(label),
       _block_size(block_size) {
-    hid_t fapl{H5Pcreate(H5P_FILE_ACCESS)};
+
+    std::transform(grid.partition_size().begin(), grid.partition_size().end(),
+                   _cached_chunk_size.begin(),
+                   [](int32_t v) { return static_cast<hsize_t>(v); });
+
+    const auto chunk_bytes = std::accumulate(
+        _cached_chunk_size.begin(), _cached_chunk_size.end(),
+        static_cast<std::uint64_t>(sizeof(double)), std::multiplies<>{});
+    if (chunk_bytes >= (std::uint64_t{1} << 32)) {
+        throw std::runtime_error(
+            "Per-rank partition of " + std::to_string(chunk_bytes) +
+            " bytes exceeds HDF5's 4 GiB chunk limit; use more ranks");
+    }
+
+    hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
     H5Pset_fapl_mpio(fapl, grid.comm(), MPI_INFO_NULL);
-    _heavy_file =
-        H5Fcreate(_heavy_data_filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
+    H5Pset_libver_bounds(fapl, H5F_LIBVER_V110, H5F_LIBVER_LATEST);
+
+    _heavy_file = H5Fcreate(
+        _heavy_data_filename.c_str(),
+        H5F_ACC_TRUNC,
+        H5P_DEFAULT,
+        fapl);
+
     H5Pclose(fapl);
 
     if (_rank == 0)

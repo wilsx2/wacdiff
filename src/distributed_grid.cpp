@@ -63,14 +63,21 @@ auto DistributedStructuredGrid::init_topology()
             _cart_neighbors[dim].second);
     }
 
-    // Initialize local grid
     for (std::ptrdiff_t dim = 0; dim < NDims; ++dim) {
-        auto unit_size{std::floor(_global_size[dim] / _cart_dims[dim])};
-        _local_start[dim] = _cart_coords[dim] * unit_size;
-        _local_size[dim] = (_cart_coords[dim] < _cart_dims[dim] - 1)
-                               ? unit_size
-                               : _global_size[dim] - _local_start[dim];
+        _partition_size[dim] =
+            (_global_size[dim] + _cart_dims[dim] - 1) / _cart_dims[dim];
+        _local_start[dim] = _cart_coords[dim] * _partition_size[dim];
+        _local_size[dim] = std::min(_partition_size[dim],
+                                    _global_size[dim] - _local_start[dim]);
         _exterior_size[dim] = _local_size[dim] + 2;
+
+        if (_local_size[dim] < 1) {
+            SPDLOG_CRITICAL(
+                "Rank {}: {} cells along axis {} cannot be split over {} "
+                "ranks without leaving a rank empty",
+                _cart_rank, _global_size[dim], dim, _cart_dims[dim]);
+            std::exit(EXIT_FAILURE);
+        }
     }
     SPDLOG_DEBUG("Rank " + std::to_string(_cart_rank) +
                  ": My partition starts at " + format_array(_local_start) +

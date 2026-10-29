@@ -30,6 +30,7 @@ public:
 private:
     // Data and Partitioning
     std::array<int32_t, NDims> _global_size;
+    std::array<int32_t, NDims> _partition_size;
     std::array<int32_t, NDims> _local_size;
     std::array<int32_t, NDims> _local_start;
     std::array<int32_t, NDims> _exterior_size;
@@ -105,6 +106,9 @@ public:
     auto local_grid() -> boost::multi::array<double, NDims> & { return _mdarray; }
     auto local_grid() const -> const boost::multi::array<double, NDims> & {
         return _mdarray;
+    }
+    auto partition_size() const -> const std::array<int, NDims> & {
+        return _partition_size;
     }
     auto local_size() const -> const std::array<int, NDims> & {
         return _local_size;
