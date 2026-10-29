@@ -8,6 +8,15 @@
 
 #include <array>
 #include <string>
+#include <utility>
+#include <vector>
+
+struct ArchiveOptions {
+    hsize_t alignment{1 << 20};
+    std::vector<std::pair<std::string, std::string>> hints{
+        {"romio_ds_write", "disable"},
+    };
+};
 
 class Archive {
 private:
@@ -20,6 +29,7 @@ private:
     std::string _heavy_data_filename;
     pugi::xml_document _light_file;
     hid_t _heavy_file;
+
 
     std::array<hsize_t, NDims> _cached_global_size;
     std::array<hsize_t, NDims> _cached_local_start;
@@ -34,7 +44,8 @@ private:
 
 public:
     Archive(const std::string &file_prefix, std::string label,
-            double block_size, const DSG &grid);
+            double block_size, const DSG &grid,
+            const ArchiveOptions &options);
     ~Archive();
     Archive(const Archive &) = delete;
     Archive &operator=(const Archive &) = delete;

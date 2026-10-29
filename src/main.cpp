@@ -11,6 +11,7 @@
 #include <omp.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <fstream>
@@ -45,6 +46,28 @@ auto parse_config(const pugi::xml_node &sim)
     config.max_iterations =
         child_value<unsigned>(convergence, "iterations_under");
     config.epsilon = child_value<double>(convergence, "avg_delta_over");
+
+    if (auto io{sim.child("io")}; io) {
+        auto &options{config.archive_options};
+        if (io.child("alignment")) {
+            options.alignment = child_value<hsize_t>(io, "alignment");
+        }
+        for (auto hint : io.children("hint")) {
+            std::string key{hint.attribute("key").as_string()};
+            std::string value{hint.attribute("value").as_string()};
+            if (key.empty()) {
+                throw ConfigError{"<hint> in <io> requires a key attribute"};
+            }
+            auto existing{std::find_if(
+                options.hints.begin(), options.hints.end(),
+                [&](const auto &entry) { return entry.first == key; })};
+            if (existing != options.hints.end()) {
+                existing->second = std::move(value);
+            } else {
+                options.hints.emplace_back(std::move(key), std::move(value));
+            }
+        }
+    }
 
     SPDLOG_TRACE("XML input file parsed");
     return config;

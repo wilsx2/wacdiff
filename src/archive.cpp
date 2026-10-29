@@ -29,6 +29,35 @@ auto join_transformed(const Range &range, Transform &&transform) -> std::string 
     return result;
 }
 
+auto log_effective_hints(hid_t file) -> void {
+    void *handle{nullptr};
+    if (H5Fget_vfd_handle(file, H5P_DEFAULT, &handle) < 0 || !handle) {
+        SPDLOG_DEBUG("Could not query the MPI-IO file handle for its hints");
+        return;
+    }
+    MPI_Info info;
+    MPI_File_get_info(*static_cast<MPI_File *>(handle), &info);
+
+    int nkeys{0};
+    MPI_Info_get_nkeys(info, &nkeys);
+    for (int i = 0; i < nkeys; ++i) {
+        char key[MPI_MAX_INFO_KEY + 1];
+        MPI_Info_get_nthkey(info, i, key);
+        char value[MPI_MAX_INFO_VAL + 1];
+        int flag{0};
+#if MPI_VERSION >= 4
+        int length{MPI_MAX_INFO_VAL + 1};
+        MPI_Info_get_string(info, key, &length, value, &flag);
+#else
+        MPI_Info_get(info, key, MPI_MAX_INFO_VAL, value, &flag);
+#endif
+        if (flag) {
+            SPDLOG_DEBUG("MPI-IO hint {} = {}", key, value);
+        }
+    }
+    MPI_Info_free(&info);
+}
+
 auto repeat_joined(const std::string &value, std::size_t count) -> std::string {
     std::string result;
     for (std::size_t i = 0; i < count; ++i) {
@@ -168,7 +197,8 @@ void Archive::write_heavy_data(const DSG &state, int step) {
 }
 
 Archive::Archive(const std::string &file_prefix, std::string label,
-                 double block_size, const DSG &grid)
+                 double block_size, const DSG &grid,
+                 const ArchiveOptions &options)
     : _rank(grid.world_rank()), _light_data_filename(file_prefix + ".xmf"),
       _heavy_data_filename(file_prefix + ".h5"), _label(label),
       _block_size(block_size) {
@@ -186,9 +216,20 @@ Archive::Archive(const std::string &file_prefix, std::string label,
             " bytes exceeds HDF5's 4 GiB chunk limit; use more ranks");
     }
 
+    MPI_Info info;
+    MPI_Info_create(&info);
+    for (const auto &[key, value] : options.hints) {
+        MPI_Info_set(info, key.c_str(), value.c_str());
+    }
+
     hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
-    H5Pset_fapl_mpio(fapl, grid.comm(), MPI_INFO_NULL);
+    H5Pset_fapl_mpio(fapl, grid.comm(), info);
     H5Pset_libver_bounds(fapl, H5F_LIBVER_V110, H5F_LIBVER_LATEST);
+    if (options.alignment > 1) {
+        H5Pset_alignment(fapl, options.alignment, options.alignment);
+    }
+    H5Pset_all_coll_metadata_ops(fapl, true);
+    H5Pset_coll_metadata_write(fapl, true);
 
     _heavy_file = H5Fcreate(
         _heavy_data_filename.c_str(),
@@ -197,6 +238,17 @@ Archive::Archive(const std::string &file_prefix, std::string label,
         fapl);
 
     H5Pclose(fapl);
+
+    void *handle{nullptr};
+    if (H5Fget_vfd_handle(_heavy_file, H5P_DEFAULT, &handle) >= 0 && handle) {
+        MPI_File_set_info(*static_cast<MPI_File *>(handle), info);
+    }
+    MPI_Info_free(&info);
+
+    if (_rank == 0 && spdlog::should_log(spdlog::level::debug)) {
+        SPDLOG_DEBUG("HDF5 alignment = {} bytes", options.alignment);
+        log_effective_hints(_heavy_file);
+    }
 
     if (_rank == 0)
         std::filesystem::remove(_light_data_filename);

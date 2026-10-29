@@ -27,4 +27,9 @@
         <avg_delta_over>0.0</avg_delta_over>
     </convergence_conditions>
 
+    <io>
+        <alignment>1048576</alignment>
+        <hint key="romio_ds_write" value="disable"/>
+    </io>
+
 </simulation>

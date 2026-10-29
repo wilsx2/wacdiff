@@ -25,7 +25,7 @@ SpmdFdmExplicitHeatEqSolver::SpmdFdmExplicitHeatEqSolver(Configuration &&config)
 
     if (_constants.storage_interval != 0) {
         _archive.emplace("sim", "temperature", _constants.space_step,
-                         _double_grid[_grid_idx]);
+                         _double_grid[_grid_idx], _constants.archive_options);
     }
 }
 

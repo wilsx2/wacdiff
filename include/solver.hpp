@@ -25,6 +25,7 @@ public:
         unsigned max_iterations;
         // Storage Params
         unsigned storage_interval;
+        ArchiveOptions archive_options;
     };
 
 private:
